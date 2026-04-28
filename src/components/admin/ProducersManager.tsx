@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Plus, Pencil, Trash2, Link as LinkIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { Host, Profile } from '@/lib/supabase/types'
+import type { Producer, Profile } from '@/lib/supabase/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -34,8 +34,8 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 
-interface HostsManagerProps {
-  initialHosts: Host[]
+interface ProducersManagerProps {
+  initialProducers: Producer[]
   profiles: Profile[]
 }
 
@@ -47,11 +47,11 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { name: '', email: '', user_id: '' }
 
-export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
-  const [hosts, setHosts] = useState<Host[]>(initialHosts)
+export function ProducersManager({ initialProducers, profiles }: ProducersManagerProps) {
+  const [producers, setProducers] = useState<Producer[]>(initialProducers)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
-  const [editingHost, setEditingHost] = useState<Host | null>(null)
+  const [editingProducer, setEditingProducer] = useState<Producer | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,15 +59,15 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
   const supabase = createClient()
 
   function openCreate() {
-    setEditingHost(null)
+    setEditingProducer(null)
     setForm(EMPTY_FORM)
     setError(null)
     setDialogOpen(true)
   }
 
-  function openEdit(host: Host) {
-    setEditingHost(host)
-    setForm({ name: host.name, email: host.email ?? '', user_id: host.user_id ?? '' })
+  function openEdit(producer: Producer) {
+    setEditingProducer(producer)
+    setForm({ name: producer.name, email: producer.email ?? '', user_id: producer.user_id ?? '' })
     setError(null)
     setDialogOpen(true)
   }
@@ -86,27 +86,27 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
       user_id: form.user_id || null,
     }
 
-    if (editingHost) {
+    if (editingProducer) {
       const { data, error } = await supabase
-        .from('hosts')
+        .from('producers')
         .update(payload)
-        .eq('id', editingHost.id)
+        .eq('id', editingProducer.id)
         .select()
         .single()
 
       if (error) { setError(error.message); setSaving(false); return }
-      setHosts(prev => prev.map(h => h.id === editingHost.id ? data : h))
-      toast({ title: 'Host updated' })
+      setProducers(prev => prev.map(p => p.id === editingProducer.id ? data : p))
+      toast({ title: 'Producer updated' })
     } else {
       const { data, error } = await supabase
-        .from('hosts')
+        .from('producers')
         .insert(payload)
         .select()
         .single()
 
       if (error) { setError(error.message); setSaving(false); return }
-      setHosts(prev => [...prev, data])
-      toast({ title: 'Host added' })
+      setProducers(prev => [...prev, data])
+      toast({ title: 'Producer added' })
     }
 
     setSaving(false)
@@ -114,12 +114,12 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
   }
 
   async function handleDelete(id: string) {
-    const { error } = await supabase.from('hosts').delete().eq('id', id)
+    const { error } = await supabase.from('producers').delete().eq('id', id)
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' })
     } else {
-      setHosts(prev => prev.filter(h => h.id !== id))
-      toast({ title: 'Host deleted' })
+      setProducers(prev => prev.filter(p => p.id !== id))
+      toast({ title: 'Producer deleted' })
     }
     setDeleteId(null)
   }
@@ -130,18 +130,18 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Hosts</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage stream hosts and their linked accounts.</p>
+          <h1 className="text-xl font-bold text-foreground">Producers</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Manage stream producers and their linked accounts.</p>
         </div>
         <Button onClick={openCreate} size="sm" className="gap-2">
           <Plus className="w-4 h-4" />
-          Add Host
+          Add Producer
         </Button>
       </div>
 
-      {hosts.length === 0 ? (
+      {producers.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
-          <p className="text-sm">No hosts yet. Add your first host to get started.</p>
+          <p className="text-sm">No producers yet. Add your first producer to get started.</p>
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
@@ -155,12 +155,12 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
               </tr>
             </thead>
             <tbody>
-              {hosts.map((host, i) => {
-                const linkedProfile = host.user_id ? profileMap.get(host.user_id) : null
+              {producers.map((producer, i) => {
+                const linkedProfile = producer.user_id ? profileMap.get(producer.user_id) : null
                 return (
-                  <tr key={host.id} className={`border-b border-border last:border-0 ${i % 2 === 0 ? '' : 'bg-secondary/20'}`}>
-                    <td className="px-4 py-3 font-medium text-foreground">{host.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{host.email || '—'}</td>
+                  <tr key={producer.id} className={`border-b border-border last:border-0 ${i % 2 === 0 ? '' : 'bg-secondary/20'}`}>
+                    <td className="px-4 py-3 font-medium text-foreground">{producer.name}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{producer.email || '—'}</td>
                     <td className="px-4 py-3">
                       {linkedProfile ? (
                         <Badge variant="secondary" className="gap-1 text-xs">
@@ -173,14 +173,14 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(host)}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(producer)}>
                           <Pencil className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteId(host.id)}
+                          onClick={() => setDeleteId(producer.id)}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
@@ -198,34 +198,34 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingHost ? 'Edit Host' : 'Add Host'}</DialogTitle>
+            <DialogTitle>{editingProducer ? 'Edit Producer' : 'Add Producer'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="host-name">Name <span className="text-destructive">*</span></Label>
+              <Label htmlFor="producer-name">Name <span className="text-destructive">*</span></Label>
               <Input
-                id="host-name"
+                id="producer-name"
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Host name"
+                placeholder="Producer name"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="host-email">
+              <Label htmlFor="producer-email">
                 Email <span className="text-muted-foreground font-normal">(optional)</span>
               </Label>
               <Input
-                id="host-email"
+                id="producer-email"
                 type="email"
                 value={form.email}
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="host@example.com"
+                placeholder="producer@example.com"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="host-user">Linked Profile</Label>
+              <Label htmlFor="producer-user">Linked Profile</Label>
               <Select value={form.user_id} onValueChange={v => setForm(f => ({ ...f, user_id: v === 'none' ? '' : v }))}>
-                <SelectTrigger id="host-user">
+                <SelectTrigger id="producer-user">
                   <SelectValue placeholder="No linked account" />
                 </SelectTrigger>
                 <SelectContent>
@@ -244,7 +244,7 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : editingHost ? 'Save Changes' : 'Add Host'}
+              {saving ? 'Saving…' : editingProducer ? 'Save Changes' : 'Add Producer'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -254,9 +254,9 @@ export function HostsManager({ initialHosts, profiles }: HostsManagerProps) {
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Host?</AlertDialogTitle>
+            <AlertDialogTitle>Delete Producer?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this host. You cannot delete a host that has streams assigned to them.
+              This will permanently delete this producer. You cannot delete a producer that has streams assigned to them.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -9,13 +9,14 @@ import listPlugin from '@fullcalendar/list'
 import type { EventContentArg, DateSelectArg, EventClickArg } from '@fullcalendar/core'
 import { streamsToEvents } from '@/hooks/useStreams'
 import { StreamEventModal, type ModalMode } from './StreamEventModal'
-import type { StreamWithRelations, Host, Brand } from '@/lib/supabase/types'
+import type { StreamWithRelations, Host, Brand, Producer } from '@/lib/supabase/types'
 import { useToast } from '@/hooks/use-toast'
 
 interface CalendarViewProps {
   initialStreams: StreamWithRelations[]
   initialHosts: Host[]
   initialBrands: Brand[]
+  initialProducers: Producer[]
   isAdmin: boolean
   currentUserId: string
 }
@@ -24,6 +25,7 @@ export function CalendarView({
   initialStreams,
   initialHosts,
   initialBrands,
+  initialProducers,
   isAdmin,
   currentUserId,
 }: CalendarViewProps) {
@@ -122,6 +124,7 @@ export function CalendarView({
         stream={selectedStream}
         hosts={initialHosts}
         brands={initialBrands}
+        producers={initialProducers}
         currentUserId={currentUserId}
       />
     </div>

@@ -211,7 +211,9 @@ export function BrandsManager({ initialBrands, profiles }: BrandsManagerProps) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="brand-email">Email</Label>
+              <Label htmlFor="brand-email">
+                Email <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
               <Input
                 id="brand-email"
                 type="email"

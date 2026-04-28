@@ -16,12 +16,14 @@ export function streamsToEvents(streams: StreamWithRelations[]): CalendarEvent[]
       borderColor: color.border,
       textColor: color.text,
       extendedProps: {
-        hostName:  s.host.name,
-        brandName: s.brand.name,
-        notes:     s.notes,
-        streamId:  s.id,
-        hostId:    s.host_id,
-        brandId:   s.brand_id,
+        hostName:     s.host.name,
+        brandName:    s.brand.name,
+        producerName: s.producer?.name ?? null,
+        notes:        s.notes,
+        streamId:     s.id,
+        hostId:       s.host_id,
+        brandId:      s.brand_id,
+        producerId:   s.producer_id,
       },
     }
   })
@@ -34,7 +36,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
   async function refreshStreams() {
     const { data } = await supabase
       .from('streams')
-      .select('*, host:hosts(id,name), brand:brands(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
       .order('start_time')
     if (data) setStreams(data as StreamWithRelations[])
   }
@@ -43,6 +45,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
     title: string
     brand_id: string
     host_id: string
+    producer_id: string | null
     start_time: string
     end_time: string
     notes: string | null
@@ -51,7 +54,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
     const { data, error } = await supabase
       .from('streams')
       .insert(payload)
-      .select('*, host:hosts(id,name), brand:brands(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
       .single()
 
     if (error) throw error
@@ -64,6 +67,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
     title?: string
     brand_id?: string
     host_id?: string
+    producer_id?: string | null
     start_time?: string
     end_time?: string
     notes?: string | null
@@ -72,7 +76,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
       .from('streams')
       .update(payload)
       .eq('id', id)
-      .select('*, host:hosts(id,name), brand:brands(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
       .single()
 
     if (error) throw error

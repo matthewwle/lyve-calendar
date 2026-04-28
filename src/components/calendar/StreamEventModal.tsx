@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { format, parseISO } from 'date-fns'
 import { Trash2 } from 'lucide-react'
-import type { Host, Brand, StreamWithRelations } from '@/lib/supabase/types'
+import type { Host, Brand, Producer, StreamWithRelations } from '@/lib/supabase/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +45,7 @@ interface StreamEventModalProps {
   stream?: StreamWithRelations
   hosts: Host[]
   brands: Brand[]
+  producers: Producer[]
   currentUserId: string
 }
 
@@ -52,6 +53,7 @@ interface FormState {
   title: string
   brand_id: string
   host_id: string
+  producer_id: string
   date: string
   start_time: string
   end_time: string
@@ -65,6 +67,7 @@ function buildFormFromStream(stream: StreamWithRelations): FormState {
     title: stream.title,
     brand_id: stream.brand_id,
     host_id: stream.host_id,
+    producer_id: stream.producer_id ?? '',
     date: format(start, 'yyyy-MM-dd'),
     start_time: format(start, 'HH:mm'),
     end_time: format(end, 'HH:mm'),
@@ -77,6 +80,7 @@ function buildFormFromRange(range: { start: Date; end: Date }): FormState {
     title: '',
     brand_id: '',
     host_id: '',
+    producer_id: '',
     date: format(range.start, 'yyyy-MM-dd'),
     start_time: format(range.start, 'HH:mm'),
     end_time: format(range.end, 'HH:mm'),
@@ -88,6 +92,7 @@ const EMPTY_FORM: FormState = {
   title: '',
   brand_id: '',
   host_id: '',
+  producer_id: '',
   date: format(new Date(), 'yyyy-MM-dd'),
   start_time: '10:00',
   end_time: '12:00',
@@ -104,6 +109,7 @@ export function StreamEventModal({
   stream,
   hosts,
   brands,
+  producers,
   currentUserId,
 }: StreamEventModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -130,6 +136,7 @@ export function StreamEventModal({
     if (!form.title.trim()) e.title = 'Title is required.'
     if (!form.brand_id) e.brand_id = 'Brand is required.'
     if (!form.host_id) e.host_id = 'Host is required.'
+    if (!form.producer_id) e.producer_id = 'Producer is required.'
     if (!form.date) e.date = 'Date is required.'
     if (!form.start_time) e.start_time = 'Start time is required.'
     if (!form.end_time) e.end_time = 'End time is required.'
@@ -158,15 +165,16 @@ export function StreamEventModal({
         const { data, error } = await supabase
           .from('streams')
           .update({
-            title:      form.title.trim(),
-            brand_id:   form.brand_id,
-            host_id:    form.host_id,
-            start_time: startISO,
-            end_time:   endISO,
-            notes:      form.notes.trim() || null,
+            title:       form.title.trim(),
+            brand_id:    form.brand_id,
+            host_id:     form.host_id,
+            producer_id: form.producer_id || null,
+            start_time:  startISO,
+            end_time:    endISO,
+            notes:       form.notes.trim() || null,
           })
           .eq('id', stream.id)
-          .select('*, host:hosts(id,name), brand:brands(id,name)')
+          .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
           .single()
         if (error) throw error
         result = data as StreamWithRelations
@@ -174,15 +182,16 @@ export function StreamEventModal({
         const { data, error } = await supabase
           .from('streams')
           .insert({
-            title:      form.title.trim(),
-            brand_id:   form.brand_id,
-            host_id:    form.host_id,
-            start_time: startISO,
-            end_time:   endISO,
-            notes:      form.notes.trim() || null,
-            created_by: currentUserId,
+            title:       form.title.trim(),
+            brand_id:    form.brand_id,
+            host_id:     form.host_id,
+            producer_id: form.producer_id || null,
+            start_time:  startISO,
+            end_time:    endISO,
+            notes:       form.notes.trim() || null,
+            created_by:  currentUserId,
           })
-          .select('*, host:hosts(id,name), brand:brands(id,name)')
+          .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
           .single()
         if (error) throw error
         result = data as StreamWithRelations
@@ -291,6 +300,30 @@ export function StreamEventModal({
                   </>
                 )}
               </div>
+            </div>
+
+            {/* Producer */}
+            <div className="space-y-1.5">
+              <Label htmlFor="stream-producer">
+                Producer {!isReadonly && <span className="text-destructive">*</span>}
+              </Label>
+              {isReadonly ? (
+                <p className="text-sm text-foreground">{stream?.producer?.name ?? '—'}</p>
+              ) : (
+                <>
+                  <Select value={form.producer_id} onValueChange={v => setForm(f => ({ ...f, producer_id: v }))}>
+                    <SelectTrigger id="stream-producer">
+                      <SelectValue placeholder="Select producer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {producers.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.producer_id && <p className="text-xs text-destructive">{errors.producer_id}</p>}
+                </>
+              )}
             </div>
 
             {/* Date */}
