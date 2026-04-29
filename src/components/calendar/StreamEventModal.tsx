@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { format, parseISO } from 'date-fns'
 import { Trash2 } from 'lucide-react'
-import type { Host, Brand, Producer, StreamWithRelations } from '@/lib/supabase/types'
+import type { Host, Producer, StreamWithRelations } from '@/lib/supabase/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -44,14 +44,13 @@ interface StreamEventModalProps {
   initialDateRange?: { start: Date; end: Date }
   stream?: StreamWithRelations
   hosts: Host[]
-  brands: Brand[]
   producers: Producer[]
+  brandId: string
   currentUserId: string
 }
 
 interface FormState {
   title: string
-  brand_id: string
   host_id: string
   producer_id: string
   date: string
@@ -65,7 +64,6 @@ function buildFormFromStream(stream: StreamWithRelations): FormState {
   const end = parseISO(stream.end_time)
   return {
     title: stream.title,
-    brand_id: stream.brand_id,
     host_id: stream.host_id,
     producer_id: stream.producer_id ?? '',
     date: format(start, 'yyyy-MM-dd'),
@@ -78,7 +76,6 @@ function buildFormFromStream(stream: StreamWithRelations): FormState {
 function buildFormFromRange(range: { start: Date; end: Date }): FormState {
   return {
     title: '',
-    brand_id: '',
     host_id: '',
     producer_id: '',
     date: format(range.start, 'yyyy-MM-dd'),
@@ -90,7 +87,6 @@ function buildFormFromRange(range: { start: Date; end: Date }): FormState {
 
 const EMPTY_FORM: FormState = {
   title: '',
-  brand_id: '',
   host_id: '',
   producer_id: '',
   date: format(new Date(), 'yyyy-MM-dd'),
@@ -108,8 +104,8 @@ export function StreamEventModal({
   initialDateRange,
   stream,
   hosts,
-  brands,
   producers,
+  brandId,
   currentUserId,
 }: StreamEventModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -134,7 +130,6 @@ export function StreamEventModal({
   function validate(): boolean {
     const e: Partial<Record<keyof FormState, string>> = {}
     if (!form.title.trim()) e.title = 'Title is required.'
-    if (!form.brand_id) e.brand_id = 'Brand is required.'
     if (!form.host_id) e.host_id = 'Host is required.'
     if (!form.producer_id) e.producer_id = 'Producer is required.'
     if (!form.date) e.date = 'Date is required.'
@@ -166,7 +161,7 @@ export function StreamEventModal({
           .from('streams')
           .update({
             title:       form.title.trim(),
-            brand_id:    form.brand_id,
+            brand_id:    brandId,
             host_id:     form.host_id,
             producer_id: form.producer_id || null,
             start_time:  startISO,
@@ -183,7 +178,7 @@ export function StreamEventModal({
           .from('streams')
           .insert({
             title:       form.title.trim(),
-            brand_id:    form.brand_id,
+            brand_id:    brandId,
             host_id:     form.host_id,
             producer_id: form.producer_id || null,
             start_time:  startISO,
@@ -253,53 +248,28 @@ export function StreamEventModal({
               )}
             </div>
 
-            {/* Brand + Host row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="stream-brand">
-                  Brand {!isReadonly && <span className="text-destructive">*</span>}
-                </Label>
-                {isReadonly ? (
-                  <p className="text-sm text-foreground">{stream?.brand.name}</p>
-                ) : (
-                  <>
-                    <Select value={form.brand_id} onValueChange={v => setForm(f => ({ ...f, brand_id: v }))}>
-                      <SelectTrigger id="stream-brand">
-                        <SelectValue placeholder="Select brand" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {brands.map(b => (
-                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.brand_id && <p className="text-xs text-destructive">{errors.brand_id}</p>}
-                  </>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="stream-host">
-                  Host {!isReadonly && <span className="text-destructive">*</span>}
-                </Label>
-                {isReadonly ? (
-                  <p className="text-sm text-foreground">{stream?.host.name}</p>
-                ) : (
-                  <>
-                    <Select value={form.host_id} onValueChange={v => setForm(f => ({ ...f, host_id: v }))}>
-                      <SelectTrigger id="stream-host">
-                        <SelectValue placeholder="Select host" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {hosts.map(h => (
-                          <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.host_id && <p className="text-xs text-destructive">{errors.host_id}</p>}
-                  </>
-                )}
-              </div>
+            {/* Host */}
+            <div className="space-y-1.5">
+              <Label htmlFor="stream-host">
+                Host {!isReadonly && <span className="text-destructive">*</span>}
+              </Label>
+              {isReadonly ? (
+                <p className="text-sm text-foreground">{stream?.host.name}</p>
+              ) : (
+                <>
+                  <Select value={form.host_id} onValueChange={v => setForm(f => ({ ...f, host_id: v }))}>
+                    <SelectTrigger id="stream-host">
+                      <SelectValue placeholder="Select host" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {hosts.map(h => (
+                        <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.host_id && <p className="text-xs text-destructive">{errors.host_id}</p>}
+                </>
+              )}
             </div>
 
             {/* Producer */}

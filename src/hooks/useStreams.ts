@@ -9,7 +9,7 @@ export function streamsToEvents(streams: StreamWithRelations[]): CalendarEvent[]
     const color = getBrandColor(s.brand_id)
     return {
       id: s.id,
-      title: `${s.brand.name} × ${s.host.name}`,
+      title: `${s.host.name} × ${s.producer?.name ?? '—'}`,
       start: s.start_time,
       end: s.end_time,
       backgroundColor: color.bg,

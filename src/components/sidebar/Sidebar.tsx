@@ -3,9 +3,9 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { CalendarDays, Users, Building2, Mic, Shield, LogOut } from 'lucide-react'
+import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { Profile } from '@/lib/supabase/types'
+import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -13,11 +13,8 @@ import { Separator } from '@/components/ui/separator'
 
 interface SidebarProps {
   profile: Profile | null
+  brands: Brand[]
 }
-
-const navLinks = [
-  { href: '/calendar', label: 'Calendar', icon: CalendarDays },
-]
 
 const adminLinks = [
   { href: '/admin/hosts', label: 'Hosts', icon: Users },
@@ -26,9 +23,10 @@ const adminLinks = [
   { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
-export function Sidebar({ profile }: SidebarProps) {
+export function Sidebar({ profile, brands }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const isAdmin = profile?.role === 'admin'
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -62,25 +60,50 @@ export function Sidebar({ profile }: SidebarProps) {
       <Separator />
 
       {/* Main nav */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {navLinks.map(({ href, label, icon: Icon }) => (
+      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+        {/* Calendars section */}
+        <div className="pb-1 px-3">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Calendars</p>
+        </div>
+
+        {brands.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground italic">
+            No calendars yet.
+          </p>
+        ) : (
+          brands.map(brand => {
+            const href = `/calendar/${brand.id}`
+            const active = pathname === href || pathname?.startsWith(`${href}/`)
+            return (
+              <Link
+                key={brand.id}
+                href={href}
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                )}
+              >
+                <CalendarDays className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">{brand.name}</span>
+              </Link>
+            )
+          })
+        )}
+
+        {isAdmin && (
           <Link
-            key={href}
-            href={href}
-            className={cn(
-              'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
-              pathname === href
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-            )}
+            href="/admin/brands"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-primary transition-colors"
           >
-            <Icon className="w-4 h-4 flex-shrink-0" />
-            {label}
+            <Plus className="w-4 h-4 flex-shrink-0" />
+            Add Brand
           </Link>
-        ))}
+        )}
 
         {/* Admin section */}
-        {profile?.role === 'admin' && (
+        {isAdmin && (
           <>
             <div className="pt-4 pb-1 px-3">
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Admin</p>

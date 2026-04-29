@@ -1,48 +1,52 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import { CalendarDays, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { CalendarView } from '@/components/calendar/CalendarView'
-import type { Host, Brand, Producer, Profile, StreamWithRelations } from '@/lib/supabase/types'
+import { Button } from '@/components/ui/button'
+import type { Brand, Profile } from '@/lib/supabase/types'
 
-export default async function CalendarPage() {
+export default async function CalendarLandingPage() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profileData } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
-
-  const profile = profileData as Profile | null
-  const isAdmin = profile?.role === 'admin'
-
-  const [
-    { data: streamsData },
-    { data: hostsData },
-    { data: brandsData },
-    { data: producersData },
-  ] = await Promise.all([
-    supabase
-      .from('streams')
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
-      .order('start_time'),
-    supabase.from('hosts').select('*').order('name'),
-    supabase.from('brands').select('*').order('name'),
-    supabase.from('producers').select('*').order('name'),
+  const [{ data: profileData }, { data: brandsData }] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase.from('brands').select('id, name').order('name'),
   ])
 
+  const profile = profileData as Profile | null
+  const brands = (brandsData as Pick<Brand, 'id' | 'name'>[] | null) ?? []
+
+  if (brands.length > 0) {
+    redirect(`/calendar/${brands[0].id}`)
+  }
+
+  // Empty state — no brands exist yet
   return (
-    <div className="h-full">
-      <CalendarView
-        initialStreams={(streamsData as StreamWithRelations[] | null) ?? []}
-        initialHosts={(hostsData as Host[] | null) ?? []}
-        initialBrands={(brandsData as Brand[] | null) ?? []}
-        initialProducers={(producersData as Producer[] | null) ?? []}
-        isAdmin={isAdmin}
-        currentUserId={user.id}
-      />
+    <div className="h-full flex items-center justify-center p-6">
+      <div className="max-w-sm text-center space-y-4">
+        <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center mx-auto">
+          <CalendarDays className="w-6 h-6 text-muted-foreground" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold text-foreground">No calendars yet</h1>
+          <p className="text-sm text-muted-foreground">
+            {profile?.role === 'admin'
+              ? 'Add your first brand to create a calendar.'
+              : 'Ask an admin to add a brand to get started.'}
+          </p>
+        </div>
+        {profile?.role === 'admin' && (
+          <Button asChild size="sm" className="gap-2">
+            <Link href="/admin/brands">
+              <Plus className="w-4 h-4" />
+              Add Brand
+            </Link>
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
