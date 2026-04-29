@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { CalendarDays, Users, Building2, Mic, Shield, LogOut, Tv2 } from 'lucide-react'
+import { CalendarDays, Users, Building2, Mic, Shield, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
@@ -44,9 +45,14 @@ export function Sidebar({ profile }: SidebarProps) {
     <aside className="w-56 flex-shrink-0 flex flex-col h-screen bg-card border-r border-border">
       {/* Logo */}
       <div className="px-4 py-5 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-          <Tv2 className="w-4.5 h-4.5 text-white" style={{ width: '1.1rem', height: '1.1rem' }} />
-        </div>
+        <Image
+          src="/Lyve-Gradient-Icon.png"
+          alt="Lyve"
+          width={32}
+          height={32}
+          priority
+          className="w-8 h-8 rounded-lg flex-shrink-0 object-contain"
+        />
         <div className="min-w-0">
           <p className="text-sm font-bold text-foreground leading-none">Lyve</p>
           <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">Internal Scheduler</p>

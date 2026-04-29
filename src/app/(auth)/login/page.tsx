@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Tv2 } from 'lucide-react'
 
 type Mode = 'signin' | 'signup'
 
@@ -78,9 +78,14 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8 gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
-            <Tv2 className="w-7 h-7 text-white" />
-          </div>
+          <Image
+            src="/Lyve-Gradient-Icon.png"
+            alt="Lyve"
+            width={56}
+            height={56}
+            priority
+            className="w-14 h-14 rounded-xl object-contain"
+          />
           <div className="text-center">
             <h1 className="text-xl font-bold text-foreground">Lyve</h1>
             <p className="text-sm text-muted-foreground">Internal Scheduler</p>
