@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { CalendarDays, Users, Building2, Mic, LogOut, Tv2 } from 'lucide-react'
+import { CalendarDays, Users, Building2, Mic, Shield, LogOut, Tv2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
@@ -22,6 +22,7 @@ const adminLinks = [
   { href: '/admin/hosts', label: 'Hosts', icon: Users },
   { href: '/admin/brands', label: 'Brands', icon: Building2 },
   { href: '/admin/producers', label: 'Producers', icon: Mic },
+  { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
 export function Sidebar({ profile }: SidebarProps) {
