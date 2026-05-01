@@ -157,6 +157,32 @@
   background-color: hsl(0 0% 9%);
 }
 
+/* Bookable shift cells: true black */
+.fc .fc-timegrid-col,
+.fc .fc-timegrid-col-frame {
+  background-color: #000000;
+}
+
+/* Remove FullCalendar's default today-column tint — the orange "now"
+   line is enough to mark today. Keep the day-header pill. */
+.fc .fc-day-today,
+.fc .fc-timegrid-col.fc-day-today {
+  background-color: #000000 !important;
+}
+
+/* Past shifts: stand out as clearly inactive history.
+   .past-cell sits as a background event over the slot, so we colour it
+   directly instead of relying on opacity. */
+.fc .fc-bg-event.past-cell {
+  background-color: #141414 !important;
+  opacity: 1 !important;
+  /* Restore the slot-divider line that the bg event would otherwise cover */
+  border-bottom: 1px solid hsl(0 0% 22%) !important;
+}
+
+/* A booked stream that has already ended: dimmed orange */
+.past-stream { opacity: 0.4; }
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

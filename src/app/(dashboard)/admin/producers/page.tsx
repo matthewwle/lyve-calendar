@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { ProducersManager } from '@/components/admin/ProducersManager'
+import { resolveRole } from '@/lib/role'
 import type { Producer, Profile } from '@/lib/supabase/types'
 
 export default async function ProducersPage() {
@@ -16,7 +17,8 @@ export default async function ProducersPage() {
     .single()
 
   const profile = profileData as Profile | null
-  if (profile?.role !== 'admin') redirect('/calendar')
+  const { effectiveIsAdmin } = await resolveRole(profile)
+  if (!effectiveIsAdmin) redirect('/calendar')
 
   const [{ data: producersData }, { data: profilesData }] = await Promise.all([
     supabase.from('producers').select('*').order('name'),

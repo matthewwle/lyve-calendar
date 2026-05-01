@@ -6,12 +6,15 @@ export interface CalendarEvent {
   backgroundColor: string
   borderColor: string
   textColor: string
+  classNames?: string[]
   extendedProps: {
-    hostName:  string
-    brandName: string
-    notes:     string | null
-    streamId:  string
-    hostId:    string
-    brandId:   string
+    hostName:     string | null
+    brandName:    string
+    producerName: string | null
+    notes:        string | null
+    streamId:     string
+    hostId:       string | null
+    brandId:      string
+    producerId:   string | null
   }
 }

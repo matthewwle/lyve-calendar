@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { UsersManager } from '@/components/admin/UsersManager'
+import { resolveRole } from '@/lib/role'
 import type { Profile } from '@/lib/supabase/types'
 
 export default async function UsersPage() {
@@ -16,7 +17,8 @@ export default async function UsersPage() {
     .single()
 
   const profile = profileData as Profile | null
-  if (profile?.role !== 'admin') redirect('/calendar')
+  const { effectiveIsAdmin } = await resolveRole(profile)
+  if (!effectiveIsAdmin) redirect('/calendar')
 
   const { data: profilesData } = await supabase
     .from('profiles')

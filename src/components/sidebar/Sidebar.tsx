@@ -3,17 +3,20 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays } from 'lucide-react'
+import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays, Eye, ShieldCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
+import { toggleViewAsHost } from '@/lib/view-as-actions'
 
 interface SidebarProps {
   profile: Profile | null
   brands: Brand[]
+  actualIsAdmin: boolean
+  viewingAsHost: boolean
 }
 
 const adminLinks = [
@@ -23,10 +26,11 @@ const adminLinks = [
   { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
-export function Sidebar({ profile, brands }: SidebarProps) {
+export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const isAdmin = profile?.role === 'admin'
+  // Effective admin = real admin AND not currently impersonating a host
+  const isAdmin = actualIsAdmin && !viewingAsHost
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -128,6 +132,37 @@ export function Sidebar({ profile, brands }: SidebarProps) {
       </nav>
 
       <Separator />
+
+      {/* View-as-host toggle (real admins only) */}
+      {actualIsAdmin && (
+        <div className="px-3 pt-3">
+          {viewingAsHost && (
+            <p className="mb-2 px-2 py-1 text-[10px] font-semibold text-primary bg-primary/15 rounded-md text-center uppercase tracking-wider">
+              Viewing as host
+            </p>
+          )}
+          <form action={toggleViewAsHost}>
+            <Button
+              type="submit"
+              variant={viewingAsHost ? 'default' : 'outline'}
+              size="sm"
+              className="w-full justify-center gap-2 h-8"
+            >
+              {viewingAsHost ? (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Back to Admin
+                </>
+              ) : (
+                <>
+                  <Eye className="w-3.5 h-3.5" />
+                  View as Host
+                </>
+              )}
+            </Button>
+          </form>
+        </div>
+      )}
 
       {/* User footer */}
       <div className="px-3 py-3">

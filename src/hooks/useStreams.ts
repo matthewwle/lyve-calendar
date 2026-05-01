@@ -2,21 +2,24 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { StreamWithRelations } from '@/lib/supabase/types'
 import type { CalendarEvent } from '@/types'
-import { getBrandColor } from '@/lib/utils'
+
+// Brand-accent orange (matches --primary / #FF4433) used for booked shifts.
+const BOOKED_BG     = '#FF4433'
+const BOOKED_BORDER = '#E03A2C'
+const BOOKED_TEXT   = '#ffffff'
 
 export function streamsToEvents(streams: StreamWithRelations[]): CalendarEvent[] {
   return streams.map(s => {
-    const color = getBrandColor(s.brand_id)
     return {
       id: s.id,
-      title: `${s.host.name} × ${s.producer?.name ?? '—'}`,
+      title: `${s.host?.name ?? 'Host TBD'} × ${s.producer?.name ?? 'Producer TBD'}`,
       start: s.start_time,
       end: s.end_time,
-      backgroundColor: color.bg,
-      borderColor: color.border,
-      textColor: color.text,
+      backgroundColor: BOOKED_BG,
+      borderColor:     BOOKED_BORDER,
+      textColor:       BOOKED_TEXT,
       extendedProps: {
-        hostName:     s.host.name,
+        hostName:     s.host?.name ?? null,
         brandName:    s.brand.name,
         producerName: s.producer?.name ?? null,
         notes:        s.notes,

@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { CalendarDays, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
+import { resolveRole } from '@/lib/role'
 import type { Brand, Profile } from '@/lib/supabase/types'
 
 export default async function CalendarLandingPage() {
@@ -17,7 +18,29 @@ export default async function CalendarLandingPage() {
   ])
 
   const profile = profileData as Profile | null
-  const brands = (brandsData as Pick<Brand, 'id' | 'name'>[] | null) ?? []
+  const allBrands = (brandsData as Pick<Brand, 'id' | 'name'>[] | null) ?? []
+  const { effectiveIsAdmin } = await resolveRole(profile)
+
+  // Filter brand list by host eligibility for non-admins
+  let brands = allBrands
+  if (!effectiveIsAdmin) {
+    const { data: myHost } = await supabase
+      .from('hosts')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!myHost) {
+      brands = []
+    } else {
+      const { data: myBrandLinks } = await supabase
+        .from('brand_hosts')
+        .select('brand_id')
+        .eq('host_id', myHost.id)
+      const allowed = new Set((myBrandLinks ?? []).map(r => r.brand_id))
+      brands = allBrands.filter(b => allowed.has(b.id))
+    }
+  }
 
   if (brands.length > 0) {
     redirect(`/calendar/${brands[0].id}`)
@@ -33,12 +56,12 @@ export default async function CalendarLandingPage() {
         <div className="space-y-1">
           <h1 className="text-lg font-semibold text-foreground">No calendars yet</h1>
           <p className="text-sm text-muted-foreground">
-            {profile?.role === 'admin'
+            {effectiveIsAdmin
               ? 'Add your first brand to create a calendar.'
               : 'Ask an admin to add a brand to get started.'}
           </p>
         </div>
-        {profile?.role === 'admin' && (
+        {effectiveIsAdmin && (
           <Button asChild size="sm" className="gap-2">
             <Link href="/admin/brands">
               <Plus className="w-4 h-4" />

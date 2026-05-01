@@ -1,11 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { format, parseISO } from 'date-fns'
-import { Trash2 } from 'lucide-react'
+import { format } from 'date-fns'
+import { Trash2, DollarSign, Hand, X as XIcon } from 'lucide-react'
 import type { Host, Producer, StreamWithRelations } from '@/lib/supabase/types'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -32,143 +31,99 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { formatCents } from '@/lib/utils'
 
-export type ModalMode = 'create' | 'edit' | 'view'
+const NONE = '__none__'
+
+interface SlotInfo {
+  start: Date
+  end: Date
+  rateCents: number
+}
 
 interface StreamEventModalProps {
-  mode: ModalMode
   isOpen: boolean
   onClose: () => void
   onSave: (stream: StreamWithRelations) => void
   onDelete?: (streamId: string) => void
-  initialDateRange?: { start: Date; end: Date }
-  stream?: StreamWithRelations
+  brandId: string
+  slot: SlotInfo | null
+  existingStream: StreamWithRelations | null
   hosts: Host[]
   producers: Producer[]
-  brandId: string
+  isAdmin: boolean
   currentUserId: string
-}
-
-interface FormState {
-  title: string
-  host_id: string
-  producer_id: string
-  date: string
-  start_time: string
-  end_time: string
-  notes: string
-}
-
-function buildFormFromStream(stream: StreamWithRelations): FormState {
-  const start = parseISO(stream.start_time)
-  const end = parseISO(stream.end_time)
-  return {
-    title: stream.title,
-    host_id: stream.host_id,
-    producer_id: stream.producer_id ?? '',
-    date: format(start, 'yyyy-MM-dd'),
-    start_time: format(start, 'HH:mm'),
-    end_time: format(end, 'HH:mm'),
-    notes: stream.notes ?? '',
-  }
-}
-
-function buildFormFromRange(range: { start: Date; end: Date }): FormState {
-  return {
-    title: '',
-    host_id: '',
-    producer_id: '',
-    date: format(range.start, 'yyyy-MM-dd'),
-    start_time: format(range.start, 'HH:mm'),
-    end_time: format(range.end, 'HH:mm'),
-    notes: '',
-  }
-}
-
-const EMPTY_FORM: FormState = {
-  title: '',
-  host_id: '',
-  producer_id: '',
-  date: format(new Date(), 'yyyy-MM-dd'),
-  start_time: '10:00',
-  end_time: '12:00',
-  notes: '',
+  currentHost: { id: string; name: string } | null
 }
 
 export function StreamEventModal({
-  mode,
   isOpen,
   onClose,
   onSave,
   onDelete,
-  initialDateRange,
-  stream,
+  brandId,
+  slot,
+  existingStream,
   hosts,
   producers,
-  brandId,
+  isAdmin,
   currentUserId,
+  currentHost,
 }: StreamEventModalProps) {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM)
-  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
+  const [hostId, setHostId] = useState<string>('')
+  const [producerId, setProducerId] = useState<string>('')
+  const [notes, setNotes] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isOpen) return
-    if (stream) {
-      setForm(buildFormFromStream(stream))
-    } else if (initialDateRange) {
-      setForm(buildFormFromRange(initialDateRange))
-    } else {
-      setForm(EMPTY_FORM)
-    }
-    setErrors({})
-    setSaveError(null)
-  }, [isOpen, stream, initialDateRange])
+    setHostId(existingStream?.host_id ?? '')
+    setProducerId(existingStream?.producer_id ?? '')
+    setNotes(existingStream?.notes ?? '')
+    setError(null)
+  }, [isOpen, existingStream])
 
-  function validate(): boolean {
-    const e: Partial<Record<keyof FormState, string>> = {}
-    if (!form.title.trim()) e.title = 'Title is required.'
-    if (!form.host_id) e.host_id = 'Host is required.'
-    if (!form.producer_id) e.producer_id = 'Producer is required.'
-    if (!form.date) e.date = 'Date is required.'
-    if (!form.start_time) e.start_time = 'Start time is required.'
-    if (!form.end_time) e.end_time = 'End time is required.'
-    if (form.start_time && form.end_time && form.end_time <= form.start_time) {
-      e.end_time = 'End time must be after start time.'
-    }
-    setErrors(e)
-    return Object.keys(e).length === 0
-  }
+  if (!slot) return null
+
+  const durationMinutes = (slot.end.getTime() - slot.start.getTime()) / 60000
+  const totalCents = Math.round((slot.rateCents * durationMinutes) / 60)
+  const isPast = slot.end.getTime() <= Date.now()
+
+  const hostName = hosts.find(h => h.id === hostId)?.name
+  const producerName = producers.find(p => p.id === producerId)?.name
 
   async function handleSave() {
-    if (!validate()) return
+    if (!isAdmin || !slot) return
     setSaving(true)
-    setSaveError(null)
+    setError(null)
 
-    const startISO = new Date(`${form.date}T${form.start_time}:00`).toISOString()
-    const endISO   = new Date(`${form.date}T${form.end_time}:00`).toISOString()
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+
+    const payload = {
+      brand_id:    brandId,
+      host_id:     hostId || null,
+      producer_id: producerId || null,
+      notes:       notes.trim() || null,
+      start_time:  slot.start.toISOString(),
+      end_time:    slot.end.toISOString(),
+      created_by:  currentUserId,
+      title:       null,
+    }
 
     try {
-      const { createClient } = await import('@/lib/supabase/client')
-      const supabase = createClient()
-
       let result: StreamWithRelations
-
-      if (mode === 'edit' && stream) {
+      if (existingStream) {
         const { data, error } = await supabase
           .from('streams')
           .update({
-            title:       form.title.trim(),
-            brand_id:    brandId,
-            host_id:     form.host_id,
-            producer_id: form.producer_id || null,
-            start_time:  startISO,
-            end_time:    endISO,
-            notes:       form.notes.trim() || null,
+            host_id:     payload.host_id,
+            producer_id: payload.producer_id,
+            notes:       payload.notes,
           })
-          .eq('id', stream.id)
+          .eq('id', existingStream.id)
           .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
           .single()
         if (error) throw error
@@ -176,16 +131,7 @@ export function StreamEventModal({
       } else {
         const { data, error } = await supabase
           .from('streams')
-          .insert({
-            title:       form.title.trim(),
-            brand_id:    brandId,
-            host_id:     form.host_id,
-            producer_id: form.producer_id || null,
-            start_time:  startISO,
-            end_time:    endISO,
-            notes:       form.notes.trim() || null,
-            created_by:  currentUserId,
-          })
+          .insert(payload)
           .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
           .single()
         if (error) throw error
@@ -195,194 +141,183 @@ export function StreamEventModal({
       onSave(result)
       onClose()
     } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : 'An error occurred.')
+      setError(err instanceof Error ? err.message : 'Failed to save.')
     } finally {
       setSaving(false)
     }
   }
 
   async function handleDelete() {
-    if (!stream || !onDelete) return
-    try {
-      const { createClient } = await import('@/lib/supabase/client')
-      const supabase = createClient()
-      const { error } = await supabase.from('streams').delete().eq('id', stream.id)
-      if (error) throw error
-      onDelete(stream.id)
-      setDeleteOpen(false)
-      onClose()
-    } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to delete.')
+    if (!existingStream || !onDelete) return
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    const { error } = await supabase.from('streams').delete().eq('id', existingStream.id)
+    if (error) {
+      setError(error.message)
+      return
     }
+    onDelete(existingStream.id)
+    setDeleteOpen(false)
+    onClose()
   }
 
-  const isReadonly = mode === 'view'
-  const title = mode === 'create' ? 'New Stream' : mode === 'edit' ? 'Edit Stream' : 'Stream Details'
+  async function handleBookShift() {
+    if (!slot || !currentHost) return
+    setSaving(true)
+    setError(null)
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .rpc('book_shift', {
+        p_brand_id:   brandId,
+        p_start_time: slot.start.toISOString(),
+        p_end_time:   slot.end.toISOString(),
+      })
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .single()
+
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    onSave(data as StreamWithRelations)
+    onClose()
+  }
+
+  async function handleUnbookShift() {
+    if (!slot || !currentHost) return
+    setSaving(true)
+    setError(null)
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .rpc('unbook_shift', {
+        p_brand_id:   brandId,
+        p_start_time: slot.start.toISOString(),
+      })
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .single()
+
+    setSaving(false)
+    if (error) { setError(error.message); return }
+
+    // If RPC returned a row with no host AND no producer, the stream was deleted.
+    const result = data as StreamWithRelations | null
+    if (existingStream && (!result || (result.host === null && result.producer === null))) {
+      onDelete?.(existingStream.id)
+    } else if (result) {
+      onSave(result)
+    }
+    onClose()
+  }
 
   return (
     <>
       <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
+            <DialogTitle>Shift Details</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Title */}
-            <div className="space-y-1.5">
-              <Label htmlFor="stream-title">
-                Stream Title {!isReadonly && <span className="text-destructive">*</span>}
-              </Label>
-              {isReadonly ? (
-                <p className="text-sm text-foreground">{stream?.title}</p>
-              ) : (
-                <>
-                  <Input
-                    id="stream-title"
-                    value={form.title}
-                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. Nike Summer Drop"
-                  />
-                  {errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
-                </>
-              )}
+            {/* Date + time + rate header card */}
+            <div className="rounded-md border border-border bg-secondary/30 px-3 py-3 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground">
+                  {format(slot.start, 'EEEE, MMMM d')}
+                </p>
+                {isPast && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                    Past shift
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {format(slot.start, 'h:mm a')} – {format(slot.end, 'h:mm a')}
+              </p>
+              <p className="inline-flex items-center gap-1 text-xs text-primary font-medium pt-0.5">
+                <DollarSign className="w-3 h-3" />
+                {formatCents(slot.rateCents)}/hr · {formatCents(totalCents)} total
+              </p>
             </div>
 
             {/* Host */}
             <div className="space-y-1.5">
-              <Label htmlFor="stream-host">
-                Host {!isReadonly && <span className="text-destructive">*</span>}
-              </Label>
-              {isReadonly ? (
-                <p className="text-sm text-foreground">{stream?.host.name}</p>
+              <Label htmlFor="slot-host">Host</Label>
+              {isAdmin ? (
+                <Select
+                  value={hostId || NONE}
+                  onValueChange={v => setHostId(v === NONE ? '' : v)}
+                >
+                  <SelectTrigger id="slot-host">
+                    <SelectValue placeholder="Not filled yet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>Not filled yet</SelectItem>
+                    {hosts.map(h => (
+                      <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               ) : (
-                <>
-                  <Select value={form.host_id} onValueChange={v => setForm(f => ({ ...f, host_id: v }))}>
-                    <SelectTrigger id="stream-host">
-                      <SelectValue placeholder="Select host" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hosts.map(h => (
-                        <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {errors.host_id && <p className="text-xs text-destructive">{errors.host_id}</p>}
-                </>
+                <p className={`text-sm ${hostName ? 'text-foreground' : 'text-muted-foreground italic'}`}>
+                  {hostName ?? 'Not filled yet'}
+                </p>
               )}
             </div>
 
             {/* Producer */}
             <div className="space-y-1.5">
-              <Label htmlFor="stream-producer">
-                Producer {!isReadonly && <span className="text-destructive">*</span>}
-              </Label>
-              {isReadonly ? (
-                <p className="text-sm text-foreground">{stream?.producer?.name ?? '—'}</p>
+              <Label htmlFor="slot-producer">Producer</Label>
+              {isAdmin ? (
+                <Select
+                  value={producerId || NONE}
+                  onValueChange={v => setProducerId(v === NONE ? '' : v)}
+                >
+                  <SelectTrigger id="slot-producer">
+                    <SelectValue placeholder="Not filled yet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>Not filled yet</SelectItem>
+                    {producers.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               ) : (
-                <>
-                  <Select value={form.producer_id} onValueChange={v => setForm(f => ({ ...f, producer_id: v }))}>
-                    <SelectTrigger id="stream-producer">
-                      <SelectValue placeholder="Select producer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {producers.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {errors.producer_id && <p className="text-xs text-destructive">{errors.producer_id}</p>}
-                </>
-              )}
-            </div>
-
-            {/* Date */}
-            <div className="space-y-1.5">
-              <Label htmlFor="stream-date">
-                Date {!isReadonly && <span className="text-destructive">*</span>}
-              </Label>
-              {isReadonly ? (
-                <p className="text-sm text-foreground">{form.date}</p>
-              ) : (
-                <>
-                  <Input
-                    id="stream-date"
-                    type="date"
-                    value={form.date}
-                    onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                  />
-                  {errors.date && <p className="text-xs text-destructive">{errors.date}</p>}
-                </>
-              )}
-            </div>
-
-            {/* Time range */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="stream-start">
-                  Start Time {!isReadonly && <span className="text-destructive">*</span>}
-                </Label>
-                {isReadonly ? (
-                  <p className="text-sm text-foreground">{form.start_time}</p>
-                ) : (
-                  <>
-                    <Input
-                      id="stream-start"
-                      type="time"
-                      value={form.start_time}
-                      onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))}
-                    />
-                    {errors.start_time && <p className="text-xs text-destructive">{errors.start_time}</p>}
-                  </>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="stream-end">
-                  End Time {!isReadonly && <span className="text-destructive">*</span>}
-                </Label>
-                {isReadonly ? (
-                  <p className="text-sm text-foreground">{form.end_time}</p>
-                ) : (
-                  <>
-                    <Input
-                      id="stream-end"
-                      type="time"
-                      value={form.end_time}
-                      onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))}
-                    />
-                    {errors.end_time && <p className="text-xs text-destructive">{errors.end_time}</p>}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Notes */}
-            <div className="space-y-1.5">
-              <Label htmlFor="stream-notes">Notes</Label>
-              {isReadonly ? (
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                  {stream?.notes || 'No notes.'}
+                <p className={`text-sm ${producerName ? 'text-foreground' : 'text-muted-foreground italic'}`}>
+                  {producerName ?? 'Not filled yet'}
                 </p>
-              ) : (
-                <Textarea
-                  id="stream-notes"
-                  value={form.notes}
-                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                  placeholder="Any notes for this stream…"
-                  rows={3}
-                />
               )}
             </div>
 
-            {saveError && (
+            {/* Notes (admin only edit) */}
+            <div className="space-y-1.5">
+              <Label htmlFor="slot-notes">
+                Notes <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              {isAdmin ? (
+                <Textarea
+                  id="slot-notes"
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Any notes for this shift…"
+                  rows={2}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {notes || '—'}
+                </p>
+              )}
+            </div>
+
+            {error && (
               <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
-                {saveError}
+                {error}
               </p>
             )}
           </div>
 
           <DialogFooter className="gap-2">
-            {mode === 'edit' && onDelete && (
+            {isAdmin && existingStream && onDelete && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -390,16 +325,57 @@ export function StreamEventModal({
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                Delete
+                Clear
               </Button>
             )}
             <Button variant="outline" onClick={onClose}>
-              {isReadonly ? 'Close' : 'Cancel'}
+              {isAdmin ? 'Cancel' : 'Close'}
             </Button>
-            {!isReadonly && (
+
+            {/* Admin: save changes */}
+            {isAdmin && (
               <Button onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Create Stream'}
+                {saving ? 'Saving…' : 'Save'}
               </Button>
+            )}
+
+            {/* Host: book / cancel — locked entirely once the shift has ended */}
+            {!isAdmin && currentHost && isPast && (
+              <span className="text-xs text-muted-foreground italic self-center">
+                This shift has ended.
+              </span>
+            )}
+
+            {!isAdmin && currentHost && !isPast && (() => {
+              const claimedByMe = existingStream?.host_id === currentHost.id
+              const taken = !!existingStream?.host_id && !claimedByMe
+              if (claimedByMe) {
+                return (
+                  <Button
+                    variant="outline"
+                    onClick={handleUnbookShift}
+                    disabled={saving}
+                    className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <XIcon className="w-3.5 h-3.5" />
+                    {saving ? 'Cancelling…' : 'Cancel my booking'}
+                  </Button>
+                )
+              }
+              if (taken) return null // someone else has it; no button
+              return (
+                <Button onClick={handleBookShift} disabled={saving} className="gap-1.5">
+                  <Hand className="w-3.5 h-3.5" />
+                  {saving ? 'Booking…' : 'Book this shift'}
+                </Button>
+              )
+            })()}
+
+            {/* Host without a linked profile */}
+            {!isAdmin && !currentHost && (
+              <span className="text-xs text-muted-foreground italic self-center">
+                Link your account to a host profile to book shifts.
+              </span>
             )}
           </DialogFooter>
         </DialogContent>
@@ -408,9 +384,9 @@ export function StreamEventModal({
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Stream?</AlertDialogTitle>
+            <AlertDialogTitle>Clear this shift?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this stream. This action cannot be undone.
+              This removes the host/producer assignment and any notes. The slot will appear as empty.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -419,7 +395,7 @@ export function StreamEventModal({
               className="bg-destructive hover:bg-destructive/90"
               onClick={handleDelete}
             >
-              Delete
+              Clear
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

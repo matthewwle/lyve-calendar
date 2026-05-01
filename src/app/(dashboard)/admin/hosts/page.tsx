@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { HostsManager } from '@/components/admin/HostsManager'
-import type { Host, Profile } from '@/lib/supabase/types'
+import { resolveRole } from '@/lib/role'
+import type { Brand, BrandHost, Host, Profile } from '@/lib/supabase/types'
 
 export default async function HostsPage() {
   const supabase = await createClient()
@@ -16,11 +17,19 @@ export default async function HostsPage() {
     .single()
 
   const profile = profileData as Profile | null
-  if (profile?.role !== 'admin') redirect('/calendar')
+  const { effectiveIsAdmin } = await resolveRole(profile)
+  if (!effectiveIsAdmin) redirect('/calendar')
 
-  const [{ data: hostsData }, { data: profilesData }] = await Promise.all([
+  const [
+    { data: hostsData },
+    { data: profilesData },
+    { data: brandsData },
+    { data: brandHostsData },
+  ] = await Promise.all([
     supabase.from('hosts').select('*').order('name'),
     supabase.from('profiles').select('*').order('email'),
+    supabase.from('brands').select('*').order('name'),
+    supabase.from('brand_hosts').select('*'),
   ])
 
   return (
@@ -28,6 +37,8 @@ export default async function HostsPage() {
       <HostsManager
         initialHosts={(hostsData as Host[] | null) ?? []}
         profiles={(profilesData as Profile[] | null) ?? []}
+        brands={(brandsData as Brand[] | null) ?? []}
+        initialBrandHosts={(brandHostsData as BrandHost[] | null) ?? []}
       />
     </div>
   )
