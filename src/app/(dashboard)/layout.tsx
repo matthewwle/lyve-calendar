@@ -24,16 +24,19 @@ export default async function DashboardLayout({
   const { actualIsAdmin, viewingAsHost } = await resolveRole(profile)
   const effectiveIsAdmin = actualIsAdmin && !viewingAsHost
 
+  // Always fetch the user's host record (admins can be hosts too) — drives both
+  // brand filtering for non-admins AND the "My Shifts" sidebar link visibility.
+  const { data: myHost } = await supabase
+    .from('hosts')
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const hasHostProfile = !!myHost
+
   // Non-admins (and admins viewing as host) only see brands their linked host
   // has access to. If they aren't linked to a host, they see nothing.
   let brands = allBrands
   if (!effectiveIsAdmin) {
-    const { data: myHost } = await supabase
-      .from('hosts')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
     if (!myHost) {
       brands = []
     } else {
@@ -53,6 +56,7 @@ export default async function DashboardLayout({
         brands={brands}
         actualIsAdmin={actualIsAdmin}
         viewingAsHost={viewingAsHost}
+        hasHostProfile={hasHostProfile}
       />
       <main className="flex-1 overflow-auto">
         {children}

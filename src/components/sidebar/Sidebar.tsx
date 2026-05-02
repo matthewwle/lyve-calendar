@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays, Eye, ShieldCheck } from 'lucide-react'
+import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays, Eye, ShieldCheck, ClipboardList } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
@@ -17,6 +17,7 @@ interface SidebarProps {
   brands: Brand[]
   actualIsAdmin: boolean
   viewingAsHost: boolean
+  hasHostProfile: boolean
 }
 
 const adminLinks = [
@@ -26,7 +27,7 @@ const adminLinks = [
   { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
-export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost }: SidebarProps) {
+export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   // Effective admin = real admin AND not currently impersonating a host
@@ -103,6 +104,22 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost }: Sideb
           >
             <Plus className="w-4 h-4 flex-shrink-0" />
             Add Brand
+          </Link>
+        )}
+
+        {/* My Shifts (only when the user is linked to a host record) */}
+        {hasHostProfile && (
+          <Link
+            href="/my-shifts"
+            className={cn(
+              'mt-4 flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              pathname === '/my-shifts'
+                ? 'bg-primary/15 text-primary'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+            )}
+          >
+            <ClipboardList className="w-4 h-4 flex-shrink-0" />
+            My Shifts
           </Link>
         )}
 
