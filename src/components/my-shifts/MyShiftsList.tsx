@@ -62,6 +62,9 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
       return t >= now && t <= monthEnd
     })
     .reduce((sum, s) => sum + s.totalCents, 0)
+  // All-time totals — every past shift the host has worked
+  const allTimeEarnedCents = past.reduce((sum, s) => sum + s.totalCents, 0)
+  const allTimeShiftsCount = past.length
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -73,7 +76,22 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
         </p>
       </div>
 
-      {/* Summary stats */}
+      {/* All-time totals */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <StatCard
+          label="All time earned"
+          value={formatCents(allTimeEarnedCents)}
+          sub={`Across ${allTimeShiftsCount} past ${allTimeShiftsCount === 1 ? 'shift' : 'shifts'}`}
+          tone="primary"
+        />
+        <StatCard
+          label="All time shifts worked"
+          value={`${allTimeShiftsCount}`}
+          sub="Completed shifts to date"
+        />
+      </div>
+
+      {/* This-month + upcoming stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
         <StatCard
           label="Upcoming"
@@ -87,7 +105,6 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
             const t = new Date(s.startISO).getTime()
             return t >= monthStart && t <= now
           }).length} past shifts`}
-          tone="primary"
         />
         <StatCard
           label="Projected this month"

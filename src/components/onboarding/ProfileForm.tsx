@@ -9,19 +9,24 @@ import type { Profile } from '@/lib/supabase/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useToast } from '@/hooks/use-toast'
 
 interface ProfileFormProps {
   userId: string
   initial: Profile | null
   headshotUrl: string | null
+  /** "onboarding" → redirect to /calendar on save (forced first-time flow).
+   *  "settings"   → stay on the page, just show a toast. */
+  mode?: 'onboarding' | 'settings'
 }
 
 const MAX_BYTES = 5 * 1024 * 1024 // 5 MB
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const OUTPUT_SIZE = 512 // square edge for the cropped JPEG we upload
 
-export function ProfileForm({ userId, initial, headshotUrl }: ProfileFormProps) {
+export function ProfileForm({ userId, initial, headshotUrl, mode = 'onboarding' }: ProfileFormProps) {
   const router = useRouter()
+  const { toast } = useToast()
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   const [phone,        setPhone]        = useState(initial?.phone        ?? '')
@@ -169,16 +174,29 @@ export function ProfileForm({ userId, initial, headshotUrl }: ProfileFormProps) 
     setSaving(false)
     if (updateErr) { setError(updateErr.message); return }
 
-    router.push('/calendar')
-    router.refresh()
+    if (mode === 'onboarding') {
+      router.push('/calendar')
+      router.refresh()
+    } else {
+      toast({ title: 'Profile updated' })
+      // If they swapped photos, the croppedFile gets consumed; reset state so
+      // the avatar circle now shows the just-uploaded version via the API URL.
+      setCroppedFile(null)
+      setCroppedPreview(`/api/headshot/${userId}?t=${Date.now()}`)
+      router.refresh()
+    }
   }
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h1 className="text-xl font-bold text-foreground">Complete your profile</h1>
+      <div className={mode === 'settings' ? '' : 'text-center'}>
+        <h1 className="text-xl font-bold text-foreground">
+          {mode === 'settings' ? 'Profile settings' : 'Complete your profile'}
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          A few details so the team knows who you are. All fields are required.
+          {mode === 'settings'
+            ? 'Update your profile details and headshot. All fields are required.'
+            : 'A few details so the team knows who you are. All fields are required.'}
         </p>
       </div>
 
@@ -308,7 +326,7 @@ export function ProfileForm({ userId, initial, headshotUrl }: ProfileFormProps) 
         )}
 
         <Button type="submit" className="w-full" disabled={saving || !!sourceUrl}>
-          {saving ? 'Saving…' : 'Complete profile'}
+          {saving ? 'Saving…' : mode === 'settings' ? 'Save changes' : 'Complete profile'}
         </Button>
       </form>
     </div>

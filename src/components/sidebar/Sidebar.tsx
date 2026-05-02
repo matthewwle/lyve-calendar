@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays, Eye, ShieldCheck, ClipboardList } from 'lucide-react'
+import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays, Eye, ShieldCheck, ClipboardList, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
@@ -212,6 +212,18 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
             )}
             <p className="text-[10px] text-muted-foreground truncate">{profile?.email}</p>
           </div>
+          <Link
+            href="/settings/profile"
+            aria-label="Profile settings"
+            className={cn(
+              'flex items-center justify-center w-7 h-7 rounded-md transition-colors flex-shrink-0',
+              pathname === '/settings/profile'
+                ? 'bg-primary/15 text-primary'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+            )}
+          >
+            <Settings className="w-4 h-4" />
+          </Link>
         </div>
         <Button
           variant="ghost"
@@ -247,6 +259,18 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
           <p className="text-xs text-muted-foreground text-center">
             {profile?.email}
           </p>
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="w-full gap-2 mt-2"
+            onClick={() => setAvatarOpen(false)}
+          >
+            <Link href="/settings/profile">
+              <Settings className="w-3.5 h-3.5" />
+              Edit profile
+            </Link>
+          </Button>
         </DialogContent>
       </Dialog>
     </aside>
