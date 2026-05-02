@@ -13,7 +13,7 @@ import type {
   EventInput,
 } from '@fullcalendar/core'
 import type { DateClickArg } from '@fullcalendar/interaction'
-import { MousePointerSquareDashed, X, Check, Ban, Unlock, DollarSign } from 'lucide-react'
+import { MousePointerSquareDashed, X, Check, Ban, Unlock, DollarSign, Clock, Lock, CheckCircle2 } from 'lucide-react'
 import { streamsToEvents } from '@/hooks/useStreams'
 import { StreamEventModal } from './StreamEventModal'
 import type { StreamWithRelations, Host, Producer, BrandShiftRate } from '@/lib/supabase/types'
@@ -35,6 +35,12 @@ interface ShiftConfig {
   dayEndMinutes: number
 }
 
+interface ConflictBooking {
+  start_time: string
+  end_time:   string
+  brandName:  string
+}
+
 interface CalendarViewProps {
   brandId: string
   initialStreams: StreamWithRelations[]
@@ -45,6 +51,7 @@ interface CalendarViewProps {
   isAdmin: boolean
   currentUserId: string
   currentHost: { id: string; name: string } | null
+  conflicts: ConflictBooking[]
 }
 
 interface SelectedSlot {
@@ -64,6 +71,7 @@ export function CalendarView({
   isAdmin,
   currentUserId,
   currentHost,
+  conflicts,
 }: CalendarViewProps) {
   const [streams, setStreams] = useState<StreamWithRelations[]>(initialStreams)
   const { toast } = useToast()
@@ -78,6 +86,11 @@ export function CalendarView({
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set())
   const [bulkRate, setBulkRate] = useState('')
   const [applying, setApplying] = useState(false)
+
+  // Track which view is currently visible so we can filter out time-grid-only
+  // background events (rate labels, conflict overlays) from month view.
+  const [currentView, setCurrentView] = useState<string>('timeGridWeek')
+  const isTimeGridView = currentView === 'timeGridWeek' || currentView === 'timeGridDay'
 
   const blockCount = useMemo(
     () => Math.max(0, Math.floor((shift.dayEndMinutes - shift.dayStartMinutes) / shift.blockSizeMinutes)),
@@ -120,9 +133,57 @@ export function CalendarView({
     [streams]
   )
 
+  // Pre-parse conflicts into [startMs, endMs, brandName] for quick overlap checks
+  const parsedConflicts = useMemo(
+    () => conflicts.map(c => ({
+      startMs: new Date(c.start_time).getTime(),
+      endMs:   new Date(c.end_time).getTime(),
+      brandName: c.brandName,
+    })),
+    [conflicts]
+  )
+
+  // True if [startMs, endMs) overlaps any of the host's other-brand bookings
+  const conflictAt = useCallback((startMs: number, endMs: number): string | null => {
+    for (const c of parsedConflicts) {
+      if (c.startMs < endMs && c.endMs > startMs) return c.brandName
+    }
+    return null
+  }, [parsedConflicts])
+
+  // Build one orange overlay event per OUR-brand block that overlaps a conflict.
+  // Snaps to this brand's grid so different block sizes / day windows align cleanly.
+  // Only relevant in time-grid views.
+  const conflictEvents: EventInput[] = useMemo(() => {
+    if (isAdmin || parsedConflicts.length === 0 || !isTimeGridView) return []
+    const out: EventInput[] = []
+    // Walk each conflict; generate per-block overlays on our grid for that day
+    for (const c of parsedConflicts) {
+      const dayAnchor = new Date(c.startMs)
+      dayAnchor.setHours(0, 0, 0, 0)
+      const midnightMs = dayAnchor.getTime()
+      for (let idx = 0; idx < blockCount; idx++) {
+        const blockStart = midnightMs + (shift.dayStartMinutes + idx * shift.blockSizeMinutes) * 60_000
+        const blockEnd   = midnightMs + (shift.dayStartMinutes + (idx + 1) * shift.blockSizeMinutes) * 60_000
+        if (c.startMs < blockEnd && c.endMs > blockStart) {
+          out.push({
+            start: new Date(blockStart).toISOString(),
+            end:   new Date(blockEnd).toISOString(),
+            display: 'background',
+            color: 'rgba(255, 68, 51, 0.55)',
+            extendedProps: { __conflict: true, brandName: c.brandName },
+          })
+        }
+      }
+    }
+    return out
+  }, [parsedConflicts, isAdmin, blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, isTimeGridView])
+
   // Background events: one per (day_of_week × block_index) so each cell shows
   // its specific rate, and selected cells get highlighted in select mode.
+  // These only make sense in time-grid views.
   const cellEvents: EventInput[] = useMemo(() => {
+    if (!isTimeGridView) return []
     const out: EventInput[] = []
     for (let dow = 0; dow < 7; dow++) {
       for (let idx = 0; idx < blockCount; idx++) {
@@ -150,18 +211,20 @@ export function CalendarView({
       }
     }
     return out
-  }, [blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, rates, selectMode, selectedCells, isAdmin])
+  }, [blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, rates, selectMode, selectedCells, isAdmin, isTimeGridView])
 
   const allEvents: EventInput[] = useMemo(
-    () => (selectMode ? cellEvents : [...cellEvents, ...events]),
-    [selectMode, cellEvents, events]
+    () => (selectMode ? cellEvents : [...cellEvents, ...conflictEvents, ...events]),
+    [selectMode, cellEvents, conflictEvents, events]
   )
 
   function openSlotForDate(date: Date) {
     const cell = snapToCell(date)
     if (!cell) return
-    // Hosts can't open blocked slots
+    // Hosts can't open blocked slots, cross-brand conflicts, or past shifts
     if (!isAdmin && rates.isBlocked(cell.dow, cell.idx)) return
+    if (!isAdmin && conflictAt(cell.start.getTime(), cell.end.getTime())) return
+    if (!isAdmin && cell.end.getTime() <= Date.now()) return
     const rateCents = rates.get(cell.dow, cell.idx)
     const existing = streams.find(
       s => s.brand_id === brandId && new Date(s.start_time).getTime() === cell.start.getTime()
@@ -176,9 +239,13 @@ export function CalendarView({
   }
 
   const handleEventClick = useCallback((clickInfo: EventClickArg) => {
-    if (clickInfo.event.extendedProps.__rateLabel) return
+    const props = clickInfo.event.extendedProps
+    // Conflict overlays are decorative — clicking does nothing
+    if (props.__conflict) return
+
     const start = clickInfo.event.start
     if (!start) return
+
     if (selectMode) {
       const cell = snapToCell(start)
       if (!cell) return
@@ -191,11 +258,20 @@ export function CalendarView({
       })
       return
     }
+
+    // Both rate-label bg events and real stream events route through the same opener
     openSlotForDate(start)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectMode, streams, blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, rates])
+  }, [selectMode, streams, blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, rates, conflictAt, isAdmin])
 
   const handleDateClick = useCallback((info: DateClickArg) => {
+    // In month view, clicking a day jumps to Week view focused on that date
+    const view = calendarRef.current?.getApi().view.type
+    if (view === 'dayGridMonth') {
+      calendarRef.current?.getApi().changeView('timeGridWeek', info.date)
+      return
+    }
+
     if (selectMode) {
       const cell = snapToCell(info.date)
       if (!cell) return
@@ -220,14 +296,30 @@ export function CalendarView({
         : [...prev, savedStream]
     })
     toast({ title: 'Shift updated' })
+    // Invalidate Next's Router Cache so the next visit (this brand or another)
+    // re-fetches fresh stream + conflict data instead of serving a stale page.
+    router.refresh()
   }
 
   function handleDelete(streamId: string) {
     setStreams(prev => prev.filter(s => s.id !== streamId))
     toast({ title: 'Shift cleared' })
+    router.refresh()
   }
 
   function renderEventContent(eventInfo: EventContentArg) {
+    if (eventInfo.event.extendedProps.__conflict) {
+      const brandName = eventInfo.event.extendedProps.brandName as string
+      return (
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center gap-1.5 px-2 text-center">
+          <Lock className="w-3 h-3 text-white shrink-0" />
+          <span className="text-xs font-bold text-white leading-tight">
+            You are already booked for {brandName}
+          </span>
+        </div>
+      )
+    }
+
     if (eventInfo.event.extendedProps.__rateLabel) {
       const cents = eventInfo.event.extendedProps.rateCents as number
       const isBlocked = eventInfo.event.extendedProps.isBlocked as boolean
@@ -238,26 +330,60 @@ export function CalendarView({
       const cellEnd = eventInfo.event.end
       const isPast = !!cellEnd && cellEnd.getTime() <= Date.now()
       const cellStartMs = eventInfo.event.start?.getTime()
+      const cellEndMs = cellEnd?.getTime()
       const hasStream = cellStartMs !== undefined && occupiedSlotTimes.has(cellStartMs)
-      const hideRate = isPast && hasStream
+      const hasConflict = cellStartMs !== undefined && cellEndMs !== undefined && !!conflictAt(cellStartMs, cellEndMs)
+      const hideRate = (isPast && hasStream) || hasConflict
 
       return (
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+        <div className="absolute inset-0 pointer-events-none">
           {isBlocked ? (
-            <X className="text-destructive/70" strokeWidth={2.5} style={{ width: '60%', height: '60%' }} />
-          ) : hideRate ? null : (
-            <span className={`text-xl font-bold tracking-tight ${isPast ? 'text-primary/60' : 'text-primary'}`}>
-              {formatCents(cents)}/hr
-            </span>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <X className="text-destructive/30" strokeWidth={2} style={{ width: '40%', height: '40%' }} />
+            </div>
+          ) : (
+            <>
+              {isPast && (
+                <Clock className="absolute top-1 left-1 w-3 h-3 text-foreground/30" />
+              )}
+              {!hideRate && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className={`text-xl font-bold tracking-tight ${isPast ? 'text-primary/60' : 'text-primary'}`}>
+                    {formatCents(cents)}/hr
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </div>
       )
     }
+    // Real stream event — render style differs by view
+    const streamEnd = eventInfo.event.end
+    const streamIsPast = !!streamEnd && streamEnd.getTime() <= Date.now()
+    const isMonth = eventInfo.view.type === 'dayGridMonth'
+
+    if (isMonth) {
+      return (
+        <div className="px-1.5 py-0.5 overflow-hidden w-full flex items-center gap-1">
+          {streamIsPast && <CheckCircle2 className="w-3 h-3 text-white/70 shrink-0" />}
+          <span className="block truncate text-[0.7rem] font-medium text-white leading-tight">
+            {eventInfo.event.title}
+          </span>
+        </div>
+      )
+    }
+
     return (
-      <div className="absolute inset-0 flex items-center justify-center px-2 text-center overflow-hidden">
-        <span className="text-base font-bold text-white leading-tight tracking-tight">
-          {eventInfo.event.title}
-        </span>
+      <div className="absolute inset-0">
+        {streamIsPast && (
+          <CheckCircle2 className="absolute top-1 right-1 w-3 h-3 text-white/70" />
+        )}
+        <div className="absolute inset-0 flex items-center justify-center px-2 text-center overflow-hidden">
+          <span className="text-base font-bold text-white leading-tight tracking-tight">
+            {eventInfo.event.title}
+          </span>
+        </div>
       </div>
     )
   }
@@ -383,11 +509,28 @@ export function CalendarView({
           events={allEvents}
           eventClick={handleEventClick}
           dateClick={handleDateClick}
+          datesSet={(arg) => setCurrentView(arg.view.type)}
+          dayCellClassNames={(arg) => {
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            return arg.date.getTime() < today.getTime() ? ['past-day'] : []
+          }}
           eventContent={renderEventContent}
           eventClassNames={(arg) => {
+            const out: string[] = []
+            const props = arg.event.extendedProps
             const end = arg.event.end
-            if (!end || end.getTime() > Date.now()) return []
-            return arg.event.extendedProps.__rateLabel ? ['past-cell'] : ['past-stream']
+            const isPast = !!end && end.getTime() <= Date.now()
+
+            if (props.__conflict) out.push('conflict-cell')
+            if (props.__rateLabel) {
+              out.push('rate-cell')
+              if (props.isBlocked) out.push('blocked-cell')
+              if (isPast) out.push('past-cell')
+            } else if (isPast && !props.__conflict) {
+              out.push('past-stream')
+            }
+            return out
           }}
           nowIndicator={true}
           slotDuration={minutesToTimeString(shift.blockSizeMinutes)}

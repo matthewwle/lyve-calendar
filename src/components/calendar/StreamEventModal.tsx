@@ -183,28 +183,31 @@ export function StreamEventModal({
   }
 
   async function handleUnbookShift() {
-    if (!slot || !currentHost) return
+    if (!slot || !currentHost || !existingStream) return
     setSaving(true)
     setError(null)
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
-    const { data, error } = await supabase
-      .rpc('unbook_shift', {
-        p_brand_id:   brandId,
-        p_start_time: slot.start.toISOString(),
-      })
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
-      .single()
+    const { error } = await supabase.rpc('unbook_shift', {
+      p_brand_id:   brandId,
+      p_start_time: slot.start.toISOString(),
+    })
 
     setSaving(false)
     if (error) { setError(error.message); return }
 
-    // If RPC returned a row with no host AND no producer, the stream was deleted.
-    const result = data as StreamWithRelations | null
-    if (existingStream && (!result || (result.host === null && result.producer === null))) {
+    // Mirror the RPC's behavior in local state so the UI updates immediately
+    // without relying on a follow-up fetch:
+    //   - producer was already null  → row was deleted → remove from list
+    //   - producer existed           → row remains, host cleared
+    if (existingStream.producer_id === null) {
       onDelete?.(existingStream.id)
-    } else if (result) {
-      onSave(result)
+    } else {
+      onSave({
+        ...existingStream,
+        host_id: null,
+        host:    null,
+      })
     }
     onClose()
   }
@@ -289,12 +292,12 @@ export function StreamEventModal({
               )}
             </div>
 
-            {/* Notes (admin only edit) */}
-            <div className="space-y-1.5">
-              <Label htmlFor="slot-notes">
-                Notes <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              {isAdmin ? (
+            {/* Notes — admin can edit, hosts can read */}
+            {isAdmin ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="slot-notes">
+                  Notes <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
                 <Textarea
                   id="slot-notes"
                   value={notes}
@@ -302,12 +305,15 @@ export function StreamEventModal({
                   placeholder="Any notes for this shift…"
                   rows={2}
                 />
-              ) : (
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                  {notes || '—'}
-                </p>
-              )}
-            </div>
+              </div>
+            ) : notes ? (
+              <div className="space-y-1.5">
+                <Label>Notes from admin</Label>
+                <div className="text-sm text-foreground whitespace-pre-wrap rounded-md border border-border bg-secondary/30 px-3 py-2">
+                  {notes}
+                </div>
+              </div>
+            ) : null}
 
             {error && (
               <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">

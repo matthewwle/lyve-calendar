@@ -83,6 +83,31 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
   const shiftRates = (ratesData as BrandShiftRate[] | null) ?? []
   const currentHost = (currentHostData as { id: string; name: string } | null) ?? null
 
+  // Cross-brand conflict overlay: this host's existing bookings on OTHER brands
+  // so we can grey them out on this calendar with "Already booked for X".
+  type Conflict = { start_time: string; end_time: string; brandName: string }
+  let conflicts: Conflict[] = []
+  if (currentHost) {
+    const { data: conflictRows } = await supabase
+      .from('streams')
+      .select('start_time, end_time, brand:brands(name)')
+      .eq('host_id', currentHost.id)
+      .neq('brand_id', brandId)
+      .gte('end_time', new Date().toISOString())
+
+    type ConflictRow = {
+      start_time: string
+      end_time:   string
+      brand: { name: string } | { name: string }[] | null
+    }
+    conflicts = ((conflictRows ?? []) as unknown as ConflictRow[])
+      .map(r => {
+        const brandName = Array.isArray(r.brand) ? r.brand[0]?.name : r.brand?.name
+        return brandName ? { start_time: r.start_time, end_time: r.end_time, brandName } : null
+      })
+      .filter((c): c is Conflict => c !== null)
+  }
+
   return (
     <div className="h-full flex flex-col">
       <CalendarHeader brand={brand} shiftRates={shiftRates} canEdit={isAdmin} />
@@ -101,6 +126,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
           isAdmin={isAdmin}
           currentUserId={user.id}
           currentHost={currentHost}
+          conflicts={conflicts}
         />
       </div>
     </div>
