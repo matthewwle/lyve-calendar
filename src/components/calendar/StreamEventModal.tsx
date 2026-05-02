@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { format } from 'date-fns'
-import { Trash2, DollarSign, Hand, X as XIcon, CalendarRange, UserCircle2 } from 'lucide-react'
+import { Trash2, DollarSign, Hand, X as XIcon, CalendarRange, UserCircle2, AlarmClock } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import type { Host, Producer, StreamWithRelations } from '@/lib/supabase/types'
 import { HostProfileDialog } from '@/components/profile/HostProfileDialog'
@@ -197,6 +197,8 @@ export function StreamEventModal({
     const targetDow  = slot.start.getDay()
     const sH = slot.start.getHours()
     const sM = slot.start.getMinutes()
+    const durationMs = slot.end.getTime() - slot.start.getTime()
+    const nowMs = Date.now()
 
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
@@ -215,17 +217,28 @@ export function StreamEventModal({
       return
     }
 
-    // Filter client-side to same weekday + same time-of-day
-    const idsToDelete = (candidates ?? [])
-      .filter(s => {
-        const sd = new Date(s.start_time)
-        return sd.getDay() === targetDow && sd.getHours() === sH && sd.getMinutes() === sM
-      })
-      .map(s => s.id as string)
+    // Match weekday + time-of-day, then split into future (deletable) vs past (kept).
+    // Past shifts are the historical record and must never be deleted.
+    let pastSkipped = 0
+    const idsToDelete: string[] = []
+    for (const s of candidates ?? []) {
+      const sd = new Date(s.start_time)
+      if (sd.getDay() !== targetDow || sd.getHours() !== sH || sd.getMinutes() !== sM) continue
+      const sEndMs = sd.getTime() + durationMs
+      if (sEndMs <= nowMs) {
+        pastSkipped++
+        continue
+      }
+      idsToDelete.push(s.id as string)
+    }
 
     if (idsToDelete.length === 0) {
       setSaving(false)
-      setError('No matching shifts found in this month.')
+      setError(
+        pastSkipped > 0
+          ? `Only past shifts match — those are kept as history and can't be cleared.`
+          : 'No matching shifts found in this month.'
+      )
       return
     }
 
@@ -235,6 +248,14 @@ export function StreamEventModal({
     if (delErr) { setError(delErr.message); return }
 
     for (const id of idsToDelete) onDelete(id)
+
+    toast({
+      title: `Cleared ${idsToDelete.length} future shift${idsToDelete.length === 1 ? '' : 's'}`,
+      description: pastSkipped > 0
+        ? `${pastSkipped} past shift${pastSkipped === 1 ? '' : 's'} kept as history.`
+        : undefined,
+    })
+
     setDeleteOpen(false)
     onClose()
   }
@@ -395,6 +416,26 @@ export function StreamEventModal({
               </p>
             </div>
 
+            {/* Arrival disclaimer — hosts only, future shifts */}
+            {!isAdmin && currentHost && !isPast && (
+              <div className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2.5 flex items-start gap-2.5">
+                <AlarmClock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                <div className="text-xs text-foreground">
+                  <p className="font-semibold">Arrive 30 minutes early</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    Be on set by{' '}
+                    <span className="text-foreground font-medium">
+                      {format(new Date(slot.start.getTime() - 30 * 60_000), 'h:mm a')}
+                    </span>{' '}
+                    so we&apos;re ready to go live at{' '}
+                    <span className="text-foreground font-medium">
+                      {format(slot.start, 'h:mm a')}
+                    </span>.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Host */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -488,7 +529,7 @@ export function StreamEventModal({
           </div>
 
           <DialogFooter className="gap-2">
-            {isAdmin && existingStream && onDelete && (
+            {isAdmin && existingStream && onDelete && !isPast && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -570,9 +611,9 @@ export function StreamEventModal({
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear shift</AlertDialogTitle>
+            <AlertDialogTitle>Clear future shifts</AlertDialogTitle>
             <AlertDialogDescription>
-              Pick the scope of the deletion. This action cannot be undone.
+              Past shifts are preserved as history and can&apos;t be deleted — only future ones are affected. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 flex-col-reverse sm:flex-row sm:justify-between">
