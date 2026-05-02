@@ -255,6 +255,7 @@ export function StreamEventModal({
     let booked = 0
     let skipped = 0
     const errors: string[] = []
+    const bookedStartTimes: string[] = []
 
     for (const { start: s, end: e } of dates) {
       const { error } = await supabase.rpc('book_shift', {
@@ -267,6 +268,20 @@ export function StreamEventModal({
         errors.push(`${format(s, 'MMM d')}: ${error.message}`)
       } else {
         booked++
+        bookedStartTimes.push(s.toISOString())
+      }
+    }
+
+    // Pull the actual stream rows for everything we just booked so local
+    // calendar state updates immediately — no hard refresh required.
+    if (bookedStartTimes.length > 0) {
+      const { data: newStreams } = await supabase
+        .from('streams')
+        .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+        .eq('brand_id', brandId)
+        .in('start_time', bookedStartTimes)
+      for (const s of (newStreams ?? []) as StreamWithRelations[]) {
+        onSave(s)
       }
     }
 
@@ -288,32 +303,65 @@ export function StreamEventModal({
   }
 
   async function handleUnbookShift() {
-    if (!slot || !currentHost || !existingStream) return
+    if (!slot || !currentHost) return
     setSaving(true)
     setError(null)
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
-    const { error } = await supabase.rpc('unbook_shift', {
-      p_brand_id:   brandId,
-      p_start_time: slot.start.toISOString(),
-    })
+
+    // Mirror the booking flow: cancel every matching weekday slot in this
+    // calendar month that this host has claimed.
+    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > Date.now())
+    const targetTimes = dates.map(d => d.start.toISOString())
+
+    if (targetTimes.length === 0) {
+      setSaving(false)
+      setError('Nothing to cancel.')
+      return
+    }
+
+    // Fetch all my matching streams in one query so we can mirror the
+    // server's delete-vs-clear behavior in local state.
+    const { data: myStreamsData } = await supabase
+      .from('streams')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .eq('brand_id', brandId)
+      .eq('host_id', currentHost.id)
+      .in('start_time', targetTimes)
+
+    const myStreams = (myStreamsData ?? []) as StreamWithRelations[]
+
+    let cancelled = 0
+    let skipped = 0
+    for (const s of myStreams) {
+      const { error } = await supabase.rpc('unbook_shift', {
+        p_brand_id:   brandId,
+        p_start_time: s.start_time,
+      })
+      if (error) {
+        skipped++
+        continue
+      }
+      cancelled++
+      if (s.producer_id === null) {
+        onDelete?.(s.id)
+      } else {
+        onSave({ ...s, host_id: null, host: null })
+      }
+    }
 
     setSaving(false)
-    if (error) { setError(error.message); return }
 
-    // Mirror the RPC's behavior in local state so the UI updates immediately
-    // without relying on a follow-up fetch:
-    //   - producer was already null  → row was deleted → remove from list
-    //   - producer existed           → row remains, host cleared
-    if (existingStream.producer_id === null) {
-      onDelete?.(existingStream.id)
-    } else {
-      onSave({
-        ...existingStream,
-        host_id: null,
-        host:    null,
-      })
+    if (cancelled === 0) {
+      setError('No shifts could be cancelled.')
+      return
     }
+
+    toast({
+      title: `Cancelled ${cancelled} shift${cancelled === 1 ? '' : 's'}`,
+      description: skipped > 0 ? `${skipped} could not be cancelled.` : undefined,
+    })
+    router.refresh()
     onClose()
   }
 
@@ -473,16 +521,23 @@ export function StreamEventModal({
               const claimedByMe = existingStream?.host_id === currentHost.id
               const taken = !!existingStream?.host_id && !claimedByMe
               if (claimedByMe) {
+                const cancelWeekday = format(slot.start, 'EEEE')
+                const cancelMonth = format(slot.start, 'MMMM')
                 return (
-                  <Button
-                    variant="outline"
-                    onClick={handleUnbookShift}
-                    disabled={saving}
-                    className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <XIcon className="w-3.5 h-3.5" />
-                    {saving ? 'Cancelling…' : 'Cancel my booking'}
-                  </Button>
+                  <div className="flex flex-col items-end gap-1">
+                    <Button
+                      variant="outline"
+                      onClick={handleUnbookShift}
+                      disabled={saving}
+                      className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <XIcon className="w-3.5 h-3.5" />
+                      {saving ? 'Cancelling…' : `Cancel every ${cancelWeekday} in ${cancelMonth}`}
+                    </Button>
+                    <span className="text-[10px] text-muted-foreground">
+                      Removes you from every {cancelWeekday} this month at this time
+                    </span>
+                  </div>
                 )
               }
               if (taken) return null // someone else has it; no button

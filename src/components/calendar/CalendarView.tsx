@@ -848,7 +848,7 @@ export function CalendarView({
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSave={handleSave}
-        onDelete={isAdmin ? handleDelete : undefined}
+        onDelete={handleDelete}
         brandId={brandId}
         slot={selectedSlot}
         existingStream={selectedSlot?.existingStream ?? null}
