@@ -9,6 +9,15 @@ export interface Database {
           email: string
           full_name: string | null
           role: UserRole
+          phone: string | null
+          height: string | null
+          weight: string | null
+          hair_color: string | null
+          eye_color: string | null
+          top_size: string | null
+          bottom_size: string | null
+          shoe_size: string | null
+          headshot_path: string | null
           created_at: string
         }
         Insert: {
@@ -16,6 +25,15 @@ export interface Database {
           email: string
           full_name?: string | null
           role?: UserRole
+          phone?: string | null
+          height?: string | null
+          weight?: string | null
+          hair_color?: string | null
+          eye_color?: string | null
+          top_size?: string | null
+          bottom_size?: string | null
+          shoe_size?: string | null
+          headshot_path?: string | null
           created_at?: string
         }
         Update: {
@@ -23,6 +41,15 @@ export interface Database {
           email?: string
           full_name?: string | null
           role?: UserRole
+          phone?: string | null
+          height?: string | null
+          weight?: string | null
+          hair_color?: string | null
+          eye_color?: string | null
+          top_size?: string | null
+          bottom_size?: string | null
+          shoe_size?: string | null
+          headshot_path?: string | null
         }
       }
       hosts: {
@@ -110,6 +137,25 @@ export interface Database {
         }
         Update: Record<string, never>
       }
+      brand_shift_overrides: {
+        Row: {
+          brand_id: string
+          shift_date: string
+          block_index: number
+          rate_cents: number
+          created_at: string
+        }
+        Insert: {
+          brand_id: string
+          shift_date: string
+          block_index: number
+          rate_cents: number
+          created_at?: string
+        }
+        Update: {
+          rate_cents?: number
+        }
+      }
       brand_shift_rates: {
         Row: {
           brand_id: string
@@ -180,8 +226,9 @@ export type Host           = Database['public']['Tables']['hosts']['Row']
 export type Brand          = Database['public']['Tables']['brands']['Row']
 export type Producer       = Database['public']['Tables']['producers']['Row']
 export type Stream         = Database['public']['Tables']['streams']['Row']
-export type BrandShiftRate = Database['public']['Tables']['brand_shift_rates']['Row']
-export type BrandHost      = Database['public']['Tables']['brand_hosts']['Row']
+export type BrandShiftRate     = Database['public']['Tables']['brand_shift_rates']['Row']
+export type BrandShiftOverride = Database['public']['Tables']['brand_shift_overrides']['Row']
+export type BrandHost          = Database['public']['Tables']['brand_hosts']['Row']
 
 export interface StreamWithRelations extends Stream {
   host:     { id: string; name: string } | null

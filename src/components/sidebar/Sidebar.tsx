@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -8,8 +9,9 @@ import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toggleViewAsHost } from '@/lib/view-as-actions'
 
 interface SidebarProps {
@@ -18,6 +20,7 @@ interface SidebarProps {
   actualIsAdmin: boolean
   viewingAsHost: boolean
   hasHostProfile: boolean
+  headshotUrl?: string | null
 }
 
 const adminLinks = [
@@ -27,11 +30,12 @@ const adminLinks = [
   { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
-export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile }: SidebarProps) {
+export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile, headshotUrl }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   // Effective admin = real admin AND not currently impersonating a host
   const isAdmin = actualIsAdmin && !viewingAsHost
+  const [avatarOpen, setAvatarOpen] = useState(false)
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -184,11 +188,25 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
       {/* User footer */}
       <div className="px-3 py-3">
         <div className="flex items-center gap-2.5 mb-2">
-          <Avatar className="w-8 h-8 flex-shrink-0">
-            <AvatarFallback className="bg-primary/20 text-primary text-xs font-semibold">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
+          <button
+            type="button"
+            onClick={() => setAvatarOpen(true)}
+            className="rounded-full ring-offset-background focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 hover:opacity-80 transition-opacity"
+            aria-label="View your profile photo"
+          >
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-primary/20 flex items-center justify-center flex-shrink-0">
+              {headshotUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={headshotUrl}
+                  alt={profile?.full_name ?? 'Avatar'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-primary text-xs font-semibold">{initials}</span>
+              )}
+            </div>
+          </button>
           <div className="min-w-0 flex-1">
             {profile?.full_name && (
               <p className="text-xs font-medium text-foreground truncate">{profile.full_name}</p>
@@ -206,6 +224,32 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
           Sign out
         </Button>
       </div>
+
+      {/* Avatar zoom dialog */}
+      <Dialog open={avatarOpen} onOpenChange={setAvatarOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{profile?.full_name || 'Your profile'}</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center py-4">
+            <div className="w-56 h-56 rounded-full overflow-hidden bg-secondary border-2 border-primary/20 flex items-center justify-center">
+              {headshotUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={headshotUrl}
+                  alt={profile?.full_name ?? 'Profile photo'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-5xl font-bold text-primary">{initials}</span>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground text-center">
+            {profile?.email}
+          </p>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }

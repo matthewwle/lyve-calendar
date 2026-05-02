@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { resolveRole } from '@/lib/role'
+import { isProfileComplete } from '@/lib/profile'
 import type { Brand, Profile } from '@/lib/supabase/types'
 
 export default async function DashboardLayout({
@@ -20,6 +21,12 @@ export default async function DashboardLayout({
   ])
 
   const profile = profileData as Profile | null
+
+  // Forced onboarding gate: incomplete profiles can't reach the app
+  if (!isProfileComplete(profile)) {
+    redirect('/onboarding/profile')
+  }
+
   const allBrands = (brandsData as Brand[] | null) ?? []
   const { actualIsAdmin, viewingAsHost } = await resolveRole(profile)
   const effectiveIsAdmin = actualIsAdmin && !viewingAsHost
@@ -49,6 +56,12 @@ export default async function DashboardLayout({
     }
   }
 
+  // Avatar served via our own API proxy — bypasses the Cloudflare/Supabase
+  // CDN edge case where a Range probe can poison the cache with 1 byte.
+  const headshotUrl = profile?.headshot_path
+    ? `/api/headshot/${user.id}`
+    : null
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar
@@ -57,6 +70,7 @@ export default async function DashboardLayout({
         actualIsAdmin={actualIsAdmin}
         viewingAsHost={viewingAsHost}
         hasHostProfile={hasHostProfile}
+        headshotUrl={headshotUrl}
       />
       <main className="flex-1 overflow-auto">
         {children}

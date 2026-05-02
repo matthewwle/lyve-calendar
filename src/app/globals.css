@@ -176,23 +176,10 @@
   background-color: hsl(0 0% 9%);
 }
 
-/* Background events drive hover feedback for booking — make them interactive */
+/* Background events stay non-interactive (FC doesn't fire eventClick on
+   them anyway). Clicks pass through to the underlying cell's dateClick. */
 .fc .fc-bg-event {
-  pointer-events: auto;
-  cursor: pointer;
   transition: background-color 80ms ease-out;
-}
-
-/* Past / blocked / conflict cells aren't bookable — no pointer or hover effect */
-.fc .fc-bg-event.past-cell,
-.fc .fc-bg-event.blocked-cell,
-.fc .fc-bg-event.conflict-cell {
-  cursor: default;
-}
-
-/* Subtle orange wash when hovering a bookable cell */
-.fc .fc-bg-event.rate-cell:not(.past-cell):not(.blocked-cell):not(.conflict-cell):hover {
-  background-color: rgba(255, 68, 51, 0.18) !important;
 }
 
 /* Bookable shift cells: true black */
@@ -259,6 +246,14 @@
 
 /* Blocked cells: cursor cue reinforces "you can't interact with this" */
 .fc .fc-bg-event.blocked-cell {
+  cursor: not-allowed;
+}
+
+/* Chain-locked cells: dimmed solid grey + lock icon. Distinct from past
+   (stripes + clock) and blocked (red X). Will open up once an adjacent
+   shift is booked. */
+.fc .fc-bg-event.chain-locked-cell {
+  background-color: #1a1a1a !important;
   cursor: not-allowed;
 }
 

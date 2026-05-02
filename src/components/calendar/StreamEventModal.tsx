@@ -1,9 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { format } from 'date-fns'
-import { Trash2, DollarSign, Hand, X as XIcon } from 'lucide-react'
+import { Trash2, DollarSign, Hand, X as XIcon, CalendarRange, UserCircle2 } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
 import type { Host, Producer, StreamWithRelations } from '@/lib/supabase/types'
+import { HostProfileDialog } from '@/components/profile/HostProfileDialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -70,6 +73,9 @@ export function StreamEventModal({
   currentUserId,
   currentHost,
 }: StreamEventModalProps) {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [profileOpen, setProfileOpen] = useState(false)
   const [hostId, setHostId] = useState<string>('')
   const [producerId, setProducerId] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
@@ -147,6 +153,27 @@ export function StreamEventModal({
     }
   }
 
+  // All matching dates in the same calendar month at the same time-of-day +
+  // weekday as `slot`. Used for whole-month booking and admin "clear month".
+  function matchingDatesInMonth(): { start: Date; end: Date }[] {
+    if (!slot) return []
+    const monthStart = new Date(slot.start.getFullYear(), slot.start.getMonth(), 1)
+    const monthEnd   = new Date(slot.start.getFullYear(), slot.start.getMonth() + 1, 1)
+    const targetDow  = slot.start.getDay()
+    const sH = slot.start.getHours()
+    const sM = slot.start.getMinutes()
+    const durationMs = slot.end.getTime() - slot.start.getTime()
+
+    const out: { start: Date; end: Date }[] = []
+    for (let d = new Date(monthStart); d < monthEnd; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() !== targetDow) continue
+      const cellStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), sH, sM, 0)
+      const cellEnd = new Date(cellStart.getTime() + durationMs)
+      out.push({ start: cellStart, end: cellEnd })
+    }
+    return out
+  }
+
   async function handleDelete() {
     if (!existingStream || !onDelete) return
     const { createClient } = await import('@/lib/supabase/client')
@@ -161,24 +188,103 @@ export function StreamEventModal({
     onClose()
   }
 
+  async function handleDeleteMonth() {
+    if (!slot || !onDelete) return
+    setSaving(true)
+    setError(null)
+
+    const monthStart = new Date(slot.start.getFullYear(), slot.start.getMonth(), 1)
+    const monthEnd   = new Date(slot.start.getFullYear(), slot.start.getMonth() + 1, 1)
+    const targetDow  = slot.start.getDay()
+    const sH = slot.start.getHours()
+    const sM = slot.start.getMinutes()
+
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+
+    // Fetch all candidate streams in the month
+    const { data: candidates, error: fetchErr } = await supabase
+      .from('streams')
+      .select('id, start_time')
+      .eq('brand_id', brandId)
+      .gte('start_time', monthStart.toISOString())
+      .lt('start_time', monthEnd.toISOString())
+
+    if (fetchErr) {
+      setSaving(false)
+      setError(fetchErr.message)
+      return
+    }
+
+    // Filter client-side to same weekday + same time-of-day
+    const idsToDelete = (candidates ?? [])
+      .filter(s => {
+        const sd = new Date(s.start_time)
+        return sd.getDay() === targetDow && sd.getHours() === sH && sd.getMinutes() === sM
+      })
+      .map(s => s.id as string)
+
+    if (idsToDelete.length === 0) {
+      setSaving(false)
+      setError('No matching shifts found in this month.')
+      return
+    }
+
+    const { error: delErr } = await supabase.from('streams').delete().in('id', idsToDelete)
+
+    setSaving(false)
+    if (delErr) { setError(delErr.message); return }
+
+    for (const id of idsToDelete) onDelete(id)
+    setDeleteOpen(false)
+    onClose()
+  }
+
   async function handleBookShift() {
     if (!slot || !currentHost) return
     setSaving(true)
     setError(null)
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
-    const { data, error } = await supabase
-      .rpc('book_shift', {
+
+    // Whole-month auto-fill: book this slot AND every other matching weekday
+    // slot in the same calendar month. Each call is validated by book_shift
+    // (past, blocked, taken-by-other, conflicts, chain rule), so individual
+    // dates may be skipped.
+    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > Date.now())
+
+    let booked = 0
+    let skipped = 0
+    const errors: string[] = []
+
+    for (const { start: s, end: e } of dates) {
+      const { error } = await supabase.rpc('book_shift', {
         p_brand_id:   brandId,
-        p_start_time: slot.start.toISOString(),
-        p_end_time:   slot.end.toISOString(),
+        p_start_time: s.toISOString(),
+        p_end_time:   e.toISOString(),
       })
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
-      .single()
+      if (error) {
+        skipped++
+        errors.push(`${format(s, 'MMM d')}: ${error.message}`)
+      } else {
+        booked++
+      }
+    }
 
     setSaving(false)
-    if (error) { setError(error.message); return }
-    onSave(data as StreamWithRelations)
+
+    if (booked === 0) {
+      setError(errors[0] ?? 'No shifts could be booked.')
+      return
+    }
+
+    toast({
+      title: `Booked ${booked} shift${booked === 1 ? '' : 's'}`,
+      description: skipped > 0
+        ? `${skipped} skipped (already taken, blocked, or chain-locked).`
+        : undefined,
+    })
+    router.refresh()
     onClose()
   }
 
@@ -244,7 +350,19 @@ export function StreamEventModal({
 
             {/* Host */}
             <div className="space-y-1.5">
-              <Label htmlFor="slot-host">Host</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="slot-host">Host</Label>
+                {isAdmin && hostId && (
+                  <button
+                    type="button"
+                    onClick={() => setProfileOpen(true)}
+                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                  >
+                    <UserCircle2 className="w-3 h-3" />
+                    View profile
+                  </button>
+                )}
+              </div>
               {isAdmin ? (
                 <Select
                   value={hostId || NONE}
@@ -369,11 +487,19 @@ export function StreamEventModal({
                 )
               }
               if (taken) return null // someone else has it; no button
+              const matchCount = matchingDatesInMonth().filter(({ end }) => end.getTime() > Date.now()).length
+              const weekday = format(slot.start, 'EEEE')
+              const monthName = format(slot.start, 'MMMM')
               return (
-                <Button onClick={handleBookShift} disabled={saving} className="gap-1.5">
-                  <Hand className="w-3.5 h-3.5" />
-                  {saving ? 'Booking…' : 'Book this shift'}
-                </Button>
+                <div className="flex flex-col items-end gap-1">
+                  <Button onClick={handleBookShift} disabled={saving} className="gap-1.5">
+                    <Hand className="w-3.5 h-3.5" />
+                    {saving ? 'Booking…' : `Book all ${matchCount} ${weekday}${matchCount === 1 ? '' : 's'} in ${monthName}`}
+                  </Button>
+                  <span className="text-[10px] text-muted-foreground">
+                    Auto-fills every {weekday} this month at the same time
+                  </span>
+                </div>
               )
             })()}
 
@@ -390,22 +516,45 @@ export function StreamEventModal({
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear this shift?</AlertDialogTitle>
+            <AlertDialogTitle>Clear shift</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the host/producer assignment and any notes. The slot will appear as empty.
+              Pick the scope of the deletion. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90"
-              onClick={handleDelete}
-            >
-              Clear
-            </AlertDialogAction>
+          <AlertDialogFooter className="gap-2 flex-col-reverse sm:flex-row sm:justify-between">
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                variant="outline"
+                onClick={handleDelete}
+                disabled={saving}
+                className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Just this shift
+              </Button>
+              <Button
+                onClick={handleDeleteMonth}
+                disabled={saving}
+                className="gap-1.5 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                <CalendarRange className="w-3.5 h-3.5" />
+                {saving ? 'Clearing…' : `Every ${format(slot.start, 'EEEE')} in ${format(slot.start, 'MMMM')}`}
+              </Button>
+            </div>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Admin profile viewer for the assigned host */}
+      {isAdmin && (
+        <HostProfileDialog
+          open={profileOpen}
+          onOpenChange={setProfileOpen}
+          userId={hosts.find(h => h.id === hostId)?.user_id ?? null}
+          displayName={hostName ?? 'Host'}
+        />
+      )}
     </>
   )
 }

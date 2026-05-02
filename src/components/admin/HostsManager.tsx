@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Plus, Pencil, Trash2, Link as LinkIcon, Building2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Brand, BrandHost, Host, Profile } from '@/lib/supabase/types'
+import { HostProfileDialog } from '@/components/profile/HostProfileDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -59,6 +60,8 @@ export function HostsManager({ initialHosts, profiles, brands, initialBrandHosts
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Profile viewer dialog state
+  const [profileTarget, setProfileTarget] = useState<{ userId: string | null; name: string } | null>(null)
   const { toast } = useToast()
   const supabase = createClient()
 
@@ -228,7 +231,16 @@ export function HostsManager({ initialHosts, profiles, brands, initialBrandHosts
                 const allBrands = accessibleCount === brands.length && brands.length > 0
                 return (
                   <tr key={host.id} className={`border-b border-border last:border-0 ${i % 2 === 0 ? '' : 'bg-secondary/20'}`}>
-                    <td className="px-4 py-3 font-medium text-foreground">{host.name}</td>
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      <button
+                        type="button"
+                        className="hover:text-primary transition-colors text-left"
+                        onClick={() => setProfileTarget({ userId: host.user_id, name: host.name })}
+                        title="View profile"
+                      >
+                        {host.name}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{host.email || '—'}</td>
                     <td className="px-4 py-3">
                       {linkedProfile ? (
@@ -401,6 +413,14 @@ export function HostsManager({ initialHosts, profiles, brands, initialBrandHosts
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Profile viewer (admin-only data) */}
+      <HostProfileDialog
+        open={!!profileTarget}
+        onOpenChange={(o) => !o && setProfileTarget(null)}
+        userId={profileTarget?.userId ?? null}
+        displayName={profileTarget?.name ?? ''}
+      />
     </div>
   )
 }

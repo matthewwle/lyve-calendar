@@ -13,10 +13,11 @@ import type {
   EventInput,
 } from '@fullcalendar/core'
 import type { DateClickArg } from '@fullcalendar/interaction'
-import { MousePointerSquareDashed, X, Check, Ban, Unlock, DollarSign, Clock, Lock, CheckCircle2 } from 'lucide-react'
+import { MousePointerSquareDashed, X, Check, Ban, Unlock, DollarSign, Clock, Lock, CheckCircle2, CalendarRange } from 'lucide-react'
+import { format } from 'date-fns'
 import { streamsToEvents } from '@/hooks/useStreams'
 import { StreamEventModal } from './StreamEventModal'
-import type { StreamWithRelations, Host, Producer, BrandShiftRate } from '@/lib/supabase/types'
+import type { StreamWithRelations, Host, Producer, BrandShiftRate, BrandShiftOverride } from '@/lib/supabase/types'
 import { useToast } from '@/hooks/use-toast'
 import {
   minutesToTimeString,
@@ -47,6 +48,7 @@ interface CalendarViewProps {
   initialHosts: Host[]
   initialProducers: Producer[]
   initialShiftRates: BrandShiftRate[]
+  initialShiftOverrides: BrandShiftOverride[]
   shift: ShiftConfig
   isAdmin: boolean
   currentUserId: string
@@ -67,6 +69,7 @@ export function CalendarView({
   initialHosts,
   initialProducers,
   initialShiftRates,
+  initialShiftOverrides,
   shift,
   isAdmin,
   currentUserId,
@@ -92,12 +95,41 @@ export function CalendarView({
   const [currentView, setCurrentView] = useState<string>('timeGridWeek')
   const isTimeGridView = currentView === 'timeGridWeek' || currentView === 'timeGridDay'
 
+  // Tracks the last time eventClick handled a click so dateClick can dedupe.
+  // FC's interaction plugin sometimes fires both for a single click when
+  // cells have overlapping events; without this, selectMode toggles twice
+  // and the cell flashes selected then deselects.
+  const lastEventClickRef = useRef<number>(0)
+
   const blockCount = useMemo(
     () => Math.max(0, Math.floor((shift.dayEndMinutes - shift.dayStartMinutes) / shift.blockSizeMinutes)),
     [shift]
   )
 
   const rates = useMemo(() => buildRateLookup(initialShiftRates), [initialShiftRates])
+
+  // Per-(date, block) overrides — quick lookup via "yyyy-mm-dd-idx" key
+  const overrideMap = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const o of initialShiftOverrides) {
+      m.set(`${o.shift_date}-${o.block_index}`, o.rate_cents)
+    }
+    return m
+  }, [initialShiftOverrides])
+
+  const dateKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+  // Effective rate for a specific cell: override beats default
+  const effectiveRate = useCallback((d: Date, idx: number): number => {
+    const key = `${dateKey(d)}-${idx}`
+    const override = overrideMap.get(key)
+    if (override !== undefined) return override
+    return rates.get(d.getDay(), idx)
+  }, [overrideMap, rates])
+
+  // Active visible date range (driven by FC's datesSet)
+  const [activeRange, setActiveRange] = useState<{ start: Date; end: Date } | null>(null)
 
   useEffect(() => {
     if (selectMode) calendarRef.current?.getApi().changeView('timeGridWeek')
@@ -132,6 +164,36 @@ export function CalendarView({
     () => new Set(streams.map(s => new Date(s.start_time).getTime())),
     [streams]
   )
+
+  // For chain-booking: per-date set of booked block_indexes
+  const bookedByDate = useMemo(() => {
+    const m = new Map<string, Set<number>>()
+    for (const s of streams) {
+      const d = new Date(s.start_time)
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+      const slotMins = d.getHours() * 60 + d.getMinutes()
+      const idx = Math.round((slotMins - shift.dayStartMinutes) / shift.blockSizeMinutes)
+      if (!m.has(key)) m.set(key, new Set())
+      m.get(key)!.add(idx)
+    }
+    return m
+  }, [streams, shift.dayStartMinutes, shift.blockSizeMinutes])
+
+  // True when a cell is locked by the chain rule:
+  //   - The day has at least one booking
+  //   - This cell isn't itself booked
+  //   - Not adjacent to any booking (idx ± 1)
+  // Admins bypass the rule entirely.
+  const chainLockedAt = useCallback((date: Date, blockIdx: number): boolean => {
+    if (isAdmin) return false
+    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+    const booked = bookedByDate.get(key)
+    if (!booked || booked.size === 0) return false
+    if (booked.has(blockIdx)) return false
+    const arr = Array.from(booked)
+    for (const b of arr) if (Math.abs(b - blockIdx) === 1) return false
+    return true
+  }, [bookedByDate, isAdmin])
 
   // Pre-parse conflicts into [startMs, endMs, brandName] for quick overlap checks
   const parsedConflicts = useMemo(
@@ -214,17 +276,22 @@ export function CalendarView({
   }, [blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, rates, selectMode, selectedCells, isAdmin, isTimeGridView])
 
   const allEvents: EventInput[] = useMemo(
-    () => (selectMode ? cellEvents : [...cellEvents, ...conflictEvents, ...events]),
+    // Conflict overlays only render outside select mode (admins don't see
+    // them anyway); stream events stay visible at all times so admins keep
+    // context of existing bookings while group-editing rates.
+    () => (selectMode ? [...cellEvents, ...events] : [...cellEvents, ...conflictEvents, ...events]),
     [selectMode, cellEvents, conflictEvents, events]
   )
 
   function openSlotForDate(date: Date) {
     const cell = snapToCell(date)
     if (!cell) return
-    // Hosts can't open blocked slots, cross-brand conflicts, or past shifts
+    // Hosts can't open blocked slots, cross-brand conflicts, past shifts,
+    // or chain-locked slots (must be adjacent to an existing booking)
     if (!isAdmin && rates.isBlocked(cell.dow, cell.idx)) return
     if (!isAdmin && conflictAt(cell.start.getTime(), cell.end.getTime())) return
     if (!isAdmin && cell.end.getTime() <= Date.now()) return
+    if (!isAdmin && chainLockedAt(cell.start, cell.idx)) return
     const rateCents = rates.get(cell.dow, cell.idx)
     const existing = streams.find(
       s => s.brand_id === brandId && new Date(s.start_time).getTime() === cell.start.getTime()
@@ -246,7 +313,16 @@ export function CalendarView({
     const start = clickInfo.event.start
     if (!start) return
 
+    // Mark this click as handled so dateClick (if it fires for the same
+    // user click) won't double-toggle the selection state.
+    lastEventClickRef.current = Date.now()
+    clickInfo.jsEvent?.stopPropagation?.()
+
     if (selectMode) {
+      // Group selection is for future shifts only
+      const cellEnd = clickInfo.event.end
+      if (cellEnd && cellEnd.getTime() <= Date.now()) return
+
       const cell = snapToCell(start)
       if (!cell) return
       const key = rateKey(cell.dow, cell.idx)
@@ -265,6 +341,10 @@ export function CalendarView({
   }, [selectMode, streams, blockCount, shift.dayStartMinutes, shift.blockSizeMinutes, rates, conflictAt, isAdmin])
 
   const handleDateClick = useCallback((info: DateClickArg) => {
+    // Skip if eventClick just handled this same user-click (prevents
+    // double-toggle when both fire on overlapping events / cells)
+    if (Date.now() - lastEventClickRef.current < 80) return
+
     // In month view, clicking a day jumps to Week view focused on that date
     const view = calendarRef.current?.getApi().view.type
     if (view === 'dayGridMonth') {
@@ -275,6 +355,8 @@ export function CalendarView({
     if (selectMode) {
       const cell = snapToCell(info.date)
       if (!cell) return
+      // Group selection is for future shifts only
+      if (cell.end.getTime() <= Date.now()) return
       const key = rateKey(cell.dow, cell.idx)
       setSelectedCells(prev => {
         const next = new Set(prev)
@@ -321,8 +403,16 @@ export function CalendarView({
     }
 
     if (eventInfo.event.extendedProps.__rateLabel) {
-      const cents = eventInfo.event.extendedProps.rateCents as number
+      const fallbackCents = eventInfo.event.extendedProps.rateCents as number
       const isBlocked = eventInfo.event.extendedProps.isBlocked as boolean
+      // Recompute rate from the specific date so per-date overrides are respected
+      const cellStartDate = eventInfo.event.start
+      let cents = fallbackCents
+      if (cellStartDate) {
+        const slotMinutes = cellStartDate.getHours() * 60 + cellStartDate.getMinutes()
+        const idx = Math.round((slotMinutes - shift.dayStartMinutes) / shift.blockSizeMinutes)
+        cents = effectiveRate(cellStartDate, idx)
+      }
 
       // Past cells render at a slightly muted tone but still show the rate —
       // unless a stream actually happened here, in which case we let the
@@ -335,11 +425,20 @@ export function CalendarView({
       const hasConflict = cellStartMs !== undefined && cellEndMs !== undefined && !!conflictAt(cellStartMs, cellEndMs)
       const hideRate = (isPast && hasStream) || hasConflict
 
+      // Chain-lock check (host only, future, not blocked)
+      const cellStart = eventInfo.event.start
+      const isChainLocked = !isAdmin && !isPast && !isBlocked && !!cellStart &&
+        chainLockedAt(cellStart, Math.round(((cellStart.getHours() * 60 + cellStart.getMinutes()) - shift.dayStartMinutes) / shift.blockSizeMinutes))
+
       return (
         <div className="absolute inset-0 pointer-events-none">
           {isBlocked ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <X className="text-destructive/30" strokeWidth={2} style={{ width: '40%', height: '40%' }} />
+            </div>
+          ) : isChainLocked ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Lock className="text-foreground/30" strokeWidth={2} style={{ width: '24%', height: '24%' }} />
             </div>
           ) : (
             <>
@@ -389,7 +488,14 @@ export function CalendarView({
   }
 
   function renderSlotLabel(arg: SlotLabelContentArg) {
-    return <span className="text-[0.72rem] text-foreground pr-1">{arg.text}</span>
+    const start = arg.date
+    const end = new Date(start.getTime() + shift.blockSizeMinutes * 60_000)
+    const fmt = (d: Date) => d.getMinutes() === 0 ? format(d, 'h a') : format(d, 'h:mm a')
+    return (
+      <span className="text-[0.7rem] font-medium text-foreground pr-1 whitespace-nowrap">
+        {fmt(start)} – {fmt(end)}
+      </span>
+    )
   }
 
   function exitSelectMode() {
@@ -415,6 +521,16 @@ export function CalendarView({
     })
   }
 
+  // Compute the specific date in the active week for a given day-of-week
+  function dateForDow(dow: number): Date | null {
+    if (!activeRange) return null
+    const startDow = activeRange.start.getDay()
+    const offset = (dow - startDow + 7) % 7
+    const d = new Date(activeRange.start)
+    d.setDate(d.getDate() + offset)
+    return d
+  }
+
   async function applyBulkRate() {
     const rate = parseFloat(bulkRate)
     if (isNaN(rate) || rate < 0) {
@@ -425,15 +541,33 @@ export function CalendarView({
       toast({ title: 'No shifts selected', variant: 'destructive' })
       return
     }
+    if (!activeRange) {
+      toast({ title: 'No active week', variant: 'destructive' })
+      return
+    }
 
     setApplying(true)
     const cents = Math.round(rate * 100)
-    const rows = buildSelectedRows({ rate_cents: cents })
+
+    // Per-date overrides for THIS WEEK only — defaults remain unchanged
+    const overrideRows = Array.from(selectedCells).map(key => {
+      const [dowStr, idxStr] = key.split('-')
+      const dow = parseInt(dowStr, 10)
+      const idx = parseInt(idxStr, 10)
+      const d = dateForDow(dow)
+      if (!d) return null
+      return {
+        brand_id: brandId,
+        shift_date: dateKey(d),
+        block_index: idx,
+        rate_cents: cents,
+      }
+    }).filter(Boolean) as { brand_id: string; shift_date: string; block_index: number; rate_cents: number }[]
 
     const supabase = createClient()
     const { error } = await supabase
-      .from('brand_shift_rates')
-      .upsert(rows, { onConflict: 'brand_id,day_of_week,block_index' })
+      .from('brand_shift_overrides')
+      .upsert(overrideRows, { onConflict: 'brand_id,shift_date,block_index' })
 
     setApplying(false)
 
@@ -443,8 +577,70 @@ export function CalendarView({
     }
 
     toast({
-      title: `Updated ${selectedCells.size} shift${selectedCells.size === 1 ? '' : 's'}`,
+      title: `Updated ${selectedCells.size} shift${selectedCells.size === 1 ? '' : 's'} this week`,
       description: `Set to ${formatCents(cents)}/hr`,
+    })
+    exitSelectMode()
+    router.refresh()
+  }
+
+  // "Set for all future times": snapshot the visible week's effective rates
+  // as the new default template, and clear any overrides for future dates so
+  // they fall back to the new template.
+  async function applyAsFutureTemplate() {
+    if (!activeRange) {
+      toast({ title: 'No active week', variant: 'destructive' })
+      return
+    }
+    setApplying(true)
+
+    // Build one rate row per (dow, idx) for every cell in the visible week
+    const newDefaults: { brand_id: string; day_of_week: number; block_index: number; rate_cents: number; is_blocked: boolean }[] = []
+    for (let dow = 0; dow < 7; dow++) {
+      const d = dateForDow(dow)
+      if (!d) continue
+      for (let idx = 0; idx < blockCount; idx++) {
+        newDefaults.push({
+          brand_id: brandId,
+          day_of_week: dow,
+          block_index: idx,
+          rate_cents: effectiveRate(d, idx),
+          is_blocked: rates.isBlocked(dow, idx), // preserve current blocked state
+        })
+      }
+    }
+
+    const supabase = createClient()
+
+    // 1. Promote effective rates to defaults
+    const { error: e1 } = await supabase
+      .from('brand_shift_rates')
+      .upsert(newDefaults, { onConflict: 'brand_id,day_of_week,block_index' })
+
+    if (e1) {
+      setApplying(false)
+      toast({ title: 'Error', description: e1.message, variant: 'destructive' })
+      return
+    }
+
+    // 2. Wipe overrides for dates in or after the next visible week so future
+    //    weeks fall back to the new defaults
+    const { error: e2 } = await supabase
+      .from('brand_shift_overrides')
+      .delete()
+      .eq('brand_id', brandId)
+      .gte('shift_date', dateKey(activeRange.end))
+
+    setApplying(false)
+
+    if (e2) {
+      toast({ title: 'Error', description: e2.message, variant: 'destructive' })
+      return
+    }
+
+    toast({
+      title: 'Locked in as future template',
+      description: 'This week’s rates now apply to every future week.',
     })
     exitSelectMode()
     router.refresh()
@@ -509,7 +705,10 @@ export function CalendarView({
           events={allEvents}
           eventClick={handleEventClick}
           dateClick={handleDateClick}
-          datesSet={(arg) => setCurrentView(arg.view.type)}
+          datesSet={(arg) => {
+            setCurrentView(arg.view.type)
+            setActiveRange({ start: arg.view.activeStart, end: arg.view.activeEnd })
+          }}
           dayCellClassNames={(arg) => {
             const today = new Date()
             today.setHours(0, 0, 0, 0)
@@ -520,6 +719,7 @@ export function CalendarView({
             const out: string[] = []
             const props = arg.event.extendedProps
             const end = arg.event.end
+            const start = arg.event.start
             const isPast = !!end && end.getTime() <= Date.now()
 
             if (props.__conflict) out.push('conflict-cell')
@@ -527,6 +727,12 @@ export function CalendarView({
               out.push('rate-cell')
               if (props.isBlocked) out.push('blocked-cell')
               if (isPast) out.push('past-cell')
+              // Chain lock only applies to bookable future cells for non-admins
+              if (!isAdmin && !isPast && !props.isBlocked && start) {
+                const slotMins = start.getHours() * 60 + start.getMinutes()
+                const idx = Math.round((slotMins - shift.dayStartMinutes) / shift.blockSizeMinutes)
+                if (chainLockedAt(start, idx)) out.push('chain-locked-cell')
+              }
             } else if (isPast && !props.__conflict) {
               out.push('past-stream')
             }
@@ -589,6 +795,21 @@ export function CalendarView({
               Set Rate
             </Button>
           </div>
+
+          <div className="h-5 w-px bg-border" />
+
+          {/* Promote this week's rates to the all-future template */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={applyAsFutureTemplate}
+            disabled={applying || !activeRange || currentView !== 'timeGridWeek'}
+            className="gap-1.5"
+            title="Snapshot this week's rates and use them as the default for every future week"
+          >
+            <CalendarRange className="w-3.5 h-3.5" />
+            Set for all future times
+          </Button>
 
           <div className="h-5 w-px bg-border" />
 

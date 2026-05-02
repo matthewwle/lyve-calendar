@@ -6,6 +6,7 @@ import { resolveRole } from '@/lib/role'
 import type {
   Brand,
   BrandShiftRate,
+  BrandShiftOverride,
   Host,
   Producer,
   Profile,
@@ -81,6 +82,13 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
   ])
 
   const shiftRates = (ratesData as BrandShiftRate[] | null) ?? []
+
+  // Per-date rate overrides (any week admin has customized away from the default)
+  const { data: overridesData } = await supabase
+    .from('brand_shift_overrides')
+    .select('*')
+    .eq('brand_id', brandId)
+  const shiftOverrides = (overridesData as BrandShiftOverride[] | null) ?? []
   const currentHost = (currentHostData as { id: string; name: string } | null) ?? null
 
   // Cross-brand conflict overlay: this host's existing bookings on OTHER brands
@@ -118,6 +126,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
           initialHosts={(hostsData as Host[] | null) ?? []}
           initialProducers={(producersData as Producer[] | null) ?? []}
           initialShiftRates={shiftRates}
+          initialShiftOverrides={shiftOverrides}
           shift={{
             blockSizeMinutes: brand.block_size_minutes,
             dayStartMinutes:  brand.day_start_minutes,
