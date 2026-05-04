@@ -1,7 +1,6 @@
-import { format, isToday, isTomorrow, isThisWeek, startOfMonth, endOfMonth } from 'date-fns'
 import { Building2, Mic, Clock, DollarSign, FileText, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
-import { formatCents } from '@/lib/utils'
+import { formatCents, formatPT, utcToPt, ptWallClockToUtc, nowPtAsUtc } from '@/lib/utils'
 
 export interface ShiftRow {
   id: string
@@ -21,20 +20,44 @@ interface MyShiftsListProps {
   shifts: ShiftRow[]
 }
 
-function formatDayHeading(date: Date): string {
-  if (isToday(date)) return `Today · ${format(date, 'EEE, MMM d')}`
-  if (isTomorrow(date)) return `Tomorrow · ${format(date, 'EEE, MMM d')}`
-  if (isThisWeek(date, { weekStartsOn: 0 })) return `${format(date, 'EEEE')} · ${format(date, 'MMM d')}`
-  return format(date, 'EEEE, MMMM d')
+// All comparisons happen against the PT calendar so a host in any TZ sees
+// the same day-bucket as the admin who scheduled the shift.
+function ptDateKey(date: Date | string): string {
+  return formatPT(date, 'yyyy-MM-dd')
+}
+
+function formatDayHeading(dayKey: string, sample: Date): string {
+  const ptNow = utcToPt(new Date())
+  const todayKey    = formatPT(new Date(), 'yyyy-MM-dd')
+  const tomorrowDate = new Date(ptNow); tomorrowDate.setDate(tomorrowDate.getDate() + 1)
+  const tomorrowKey = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth() + 1).padStart(2, '0')}-${String(tomorrowDate.getDate()).padStart(2, '0')}`
+
+  if (dayKey === todayKey)    return `Today · ${formatPT(sample, 'EEE, MMM d')}`
+  if (dayKey === tomorrowKey) return `Tomorrow · ${formatPT(sample, 'EEE, MMM d')}`
+
+  // "This PT week" check: PT week starts Sunday
+  const sundayKey = (() => {
+    const d = new Date(ptNow)
+    d.setDate(d.getDate() - d.getDay()) // back to Sunday
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+  const nextSundayKey = (() => {
+    const d = new Date(ptNow)
+    d.setDate(d.getDate() - d.getDay() + 7)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+  if (dayKey >= sundayKey && dayKey < nextSundayKey) {
+    return `${formatPT(sample, 'EEEE')} · ${formatPT(sample, 'MMM d')}`
+  }
+  return formatPT(sample, 'EEEE, MMMM d')
 }
 
 function groupByDay(shifts: ShiftRow[]): { dayKey: string; date: Date; items: ShiftRow[] }[] {
   const groups = new Map<string, { date: Date; items: ShiftRow[] }>()
   for (const s of shifts) {
     const d = new Date(s.startISO)
-    const dayKey = format(d, 'yyyy-MM-dd')
-    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-    if (!groups.has(dayKey)) groups.set(dayKey, { date: dayStart, items: [] })
+    const dayKey = ptDateKey(d)
+    if (!groups.has(dayKey)) groups.set(dayKey, { date: d, items: [] })
     groups.get(dayKey)!.items.push(s)
   }
   return Array.from(groups.entries()).map(([dayKey, v]) => ({ dayKey, ...v }))
@@ -44,10 +67,16 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
   const upcoming = shifts.filter(s => !s.isPast).sort((a, b) => a.startISO.localeCompare(b.startISO))
   const past     = shifts.filter(s => s.isPast).sort((a, b) => b.startISO.localeCompare(a.startISO))
 
-  // Stats
-  const monthStart = startOfMonth(new Date()).getTime()
-  const monthEnd   = endOfMonth(new Date()).getTime()
-  const now = Date.now()
+  // Stats — month boundaries computed in PT so "this month" matches the
+  // calendar month admins see in the brand calendar.
+  const ptNowForStats = utcToPt(new Date())
+  const monthStart = ptWallClockToUtc(
+    new Date(ptNowForStats.getFullYear(), ptNowForStats.getMonth(), 1, 0, 0, 0, 0)
+  ).getTime()
+  const monthEnd = ptWallClockToUtc(
+    new Date(ptNowForStats.getFullYear(), ptNowForStats.getMonth() + 1, 1, 0, 0, 0, 0)
+  ).getTime()
+  const now = nowPtAsUtc().getTime()
 
   const upcomingTotalCents = upcoming.reduce((sum, s) => sum + s.totalCents, 0)
   const monthEarnedCents = past
@@ -123,7 +152,7 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
             {groupByDay(upcoming).map(g => (
               <div key={g.dayKey}>
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  {formatDayHeading(g.date)}
+                  {formatDayHeading(g.dayKey, g.date)}
                 </h3>
                 <div className="space-y-2">
                   {g.items.map(s => <ShiftCard key={s.id} shift={s} />)}
@@ -142,7 +171,7 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
               {groupByDay(past).slice(0, 30).map(g => (
                 <div key={g.dayKey}>
                   <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    {formatDayHeading(g.date)}
+                    {formatDayHeading(g.dayKey, g.date)}
                   </h3>
                   <div className="space-y-2">
                     {g.items.map(s => <ShiftCard key={s.id} shift={s} past />)}
@@ -202,7 +231,7 @@ function ShiftCard({ shift, past }: { shift: ShiftRow; past?: boolean }) {
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            {format(start, 'h:mm a')} – {format(end, 'h:mm a')}
+            {formatPT(start, 'h:mm a')} – {formatPT(end, 'h:mm a')}
           </span>
           <span className="inline-flex items-center gap-1 text-primary font-medium">
             <DollarSign className="w-3 h-3" />

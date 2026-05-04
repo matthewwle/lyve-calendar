@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { CalendarHeader } from '@/components/calendar/CalendarHeader'
 import { resolveRole } from '@/lib/role'
+import { nowPtAsUtc } from '@/lib/utils'
 import type {
   Brand,
   BrandShiftRate,
@@ -101,7 +102,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
       .select('start_time, end_time, brand:brands(name)')
       .eq('host_id', currentHost.id)
       .neq('brand_id', brandId)
-      .gte('end_time', new Date().toISOString())
+      .gte('end_time', nowPtAsUtc().toISOString())
 
     type ConflictRow = {
       start_time: string

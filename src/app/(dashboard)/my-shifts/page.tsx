@@ -2,8 +2,8 @@ import { redirect } from 'next/navigation'
 import { ClipboardList } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { MyShiftsList, type ShiftRow } from '@/components/my-shifts/MyShiftsList'
-import { buildRateLookup, DEFAULT_RATE_CENTS } from '@/lib/utils'
-import type { Brand, BrandShiftRate } from '@/lib/supabase/types'
+import { buildRateLookup, DEFAULT_RATE_CENTS, utcToPt, formatPT, nowPtAsUtc } from '@/lib/utils'
+import type { Brand, BrandShiftRate, BrandShiftOverride } from '@/lib/supabase/types'
 
 export default async function MyShiftsPage() {
   const supabase = await createClient()
@@ -65,30 +65,52 @@ export default async function MyShiftsPage() {
     producer: Array.isArray(s.producer) ? s.producer[0] ?? null : s.producer,
   })).filter(s => s.brand)
 
-  // Batch-fetch the rate rows for every brand the host is on (single query)
+  // Batch-fetch the rate rows + per-date overrides for every brand the host is on
   const brandIds = Array.from(new Set(streams.map(s => s.brand_id)))
-  const { data: ratesData } = brandIds.length > 0
-    ? await supabase.from('brand_shift_rates').select('*').in('brand_id', brandIds)
-    : { data: [] as BrandShiftRate[] }
+  const [{ data: ratesData }, { data: overridesData }] = brandIds.length > 0
+    ? await Promise.all([
+        supabase.from('brand_shift_rates').select('*').in('brand_id', brandIds),
+        supabase.from('brand_shift_overrides').select('*').in('brand_id', brandIds),
+      ])
+    : [
+        { data: [] as BrandShiftRate[] },
+        { data: [] as BrandShiftOverride[] },
+      ]
 
-  // Map brand_id → rates lookup
+  // Map brand_id → rates lookup (per-(weekday, block) defaults)
   const ratesByBrand = new Map<string, ReturnType<typeof buildRateLookup>>()
   for (const brandId of brandIds) {
     const rows = (ratesData as BrandShiftRate[]).filter(r => r.brand_id === brandId)
     ratesByBrand.set(brandId, buildRateLookup(rows))
   }
 
-  // Compute the per-shift rate using each brand's day_start + block_size + rates
-  const now = Date.now()
+  // Map brand_id → override lookup keyed by "yyyy-mm-dd-blockIdx"
+  const overridesByBrand = new Map<string, Map<string, number>>()
+  for (const o of (overridesData as BrandShiftOverride[] | null) ?? []) {
+    if (!overridesByBrand.has(o.brand_id)) overridesByBrand.set(o.brand_id, new Map())
+    overridesByBrand.get(o.brand_id)!.set(`${o.shift_date}-${o.block_index}`, o.rate_cents)
+  }
+
+  // Compute the actual per-shift price using overrides first, falling back to
+  // the per-(weekday, block) default. Mirrors the calendar's effective-rate
+  // logic so totals match what the user sees on each cell.
+  const now = nowPtAsUtc().getTime()
   const shifts: ShiftRow[] = streams.map(s => {
     const brand = s.brand as Pick<Brand, 'id' | 'name' | 'block_size_minutes' | 'day_start_minutes'>
     const startDate = new Date(s.start_time)
     const endDate = new Date(s.end_time)
-    const slotMins = startDate.getHours() * 60 + startDate.getMinutes()
+    // PT-derived day, hour and minute so the lookup matches the same
+    // (weekday, block) the admin saw when they set the rate.
+    const ptStart = utcToPt(startDate)
+    const slotMins = ptStart.getHours() * 60 + ptStart.getMinutes()
     const blockIdx = Math.round((slotMins - brand.day_start_minutes) / brand.block_size_minutes)
-    const dow = startDate.getDay()
+    const dow = ptStart.getDay()
+
+    const dateKey = formatPT(startDate, 'yyyy-MM-dd')
+    const overrideRate = overridesByBrand.get(brand.id)?.get(`${dateKey}-${blockIdx}`)
     const lookup = ratesByBrand.get(brand.id)
-    const rateCents = lookup ? lookup.get(dow, blockIdx) : DEFAULT_RATE_CENTS
+    const rateCents = overrideRate ?? (lookup ? lookup.get(dow, blockIdx) : DEFAULT_RATE_CENTS)
+
     const durationMinutes = (endDate.getTime() - startDate.getTime()) / 60_000
     const totalCents = Math.round((rateCents * durationMinutes) / 60)
     return {

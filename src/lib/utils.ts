@@ -1,8 +1,53 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { formatInTimeZone, fromZonedTime, toZonedTime } from 'date-fns-tz'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+// ============================================================
+// "Pacific Time" via UTC-naive timestamps
+// ============================================================
+// Stream timestamps are stored naively — the UTC hour/minute IS the PT
+// wall-clock. We never apply a timezone offset, so the same row reads as
+// the same wall-clock for every viewer. Operationally this is "UTC" for
+// the calendar's purposes; the "PT" label is conventional.
+export const APP_TIMEZONE = 'UTC'
+
+/** Format a stream timestamp using its UTC fields, displayed as the PT
+ *  wall-clock time. */
+export function formatPT(date: Date | string, fmt: string): string {
+  return formatInTimeZone(typeof date === 'string' ? new Date(date) : date, APP_TIMEZONE, fmt)
+}
+
+/** Identity in this scheme: "PT wall-clock" already lives in the UTC fields. */
+export function ptWallClockToUtc(localDate: Date): Date {
+  return fromZonedTime(localDate, APP_TIMEZONE)
+}
+
+/** Identity in this scheme: extracting "PT" fields IS getting UTC fields. */
+export function utcToPt(date: Date | string): Date {
+  return toZonedTime(typeof date === 'string' ? new Date(date) : date, APP_TIMEZONE)
+}
+
+/** "Now" expressed in our naive scheme: take the real PT wall-clock and
+ *  encode its components as UTC fields. Use this anywhere you need to
+ *  compare a stored stream timestamp against the current moment. */
+export function nowPtAsUtc(): Date {
+  const real = new Date()
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(real)
+  const part = (t: string) => Number(parts.find(p => p.type === t)!.value)
+  return new Date(Date.UTC(
+    part('year'), part('month') - 1, part('day'),
+    part('hour') === 24 ? 0 : part('hour'),
+    part('minute'), part('second')
+  ))
 }
 
 export const BRAND_COLORS = [

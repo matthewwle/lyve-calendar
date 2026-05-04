@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { format } from 'date-fns'
 import { Trash2, DollarSign, Hand, X as XIcon, CalendarRange, UserCircle2, AlarmClock } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import type { Host, Producer, StreamWithRelations } from '@/lib/supabase/types'
@@ -33,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { formatCents } from '@/lib/utils'
+import { formatCents, formatPT, utcToPt, ptWallClockToUtc, nowPtAsUtc } from '@/lib/utils'
 
 const NONE = '__none__'
 
@@ -94,7 +93,7 @@ export function StreamEventModal({
 
   const durationMinutes = (slot.end.getTime() - slot.start.getTime()) / 60000
   const totalCents = Math.round((slot.rateCents * durationMinutes) / 60)
-  const isPast = slot.end.getTime() <= Date.now()
+  const isPast = slot.end.getTime() <= nowPtAsUtc().getTime()
 
   const hostName = hosts.find(h => h.id === hostId)?.name
   const producerName = producers.find(p => p.id === producerId)?.name
@@ -152,23 +151,31 @@ export function StreamEventModal({
     }
   }
 
-  // All matching dates in the same calendar month at the same time-of-day +
-  // weekday as `slot`. Used for whole-month booking and admin "clear month".
+  // All matching dates in the same PT calendar month at the same PT
+  // time-of-day + weekday as `slot`. Used for whole-month booking and
+  // admin "clear month".
   function matchingDatesInMonth(): { start: Date; end: Date }[] {
     if (!slot) return []
-    const monthStart = new Date(slot.start.getFullYear(), slot.start.getMonth(), 1)
-    const monthEnd   = new Date(slot.start.getFullYear(), slot.start.getMonth() + 1, 1)
-    const targetDow  = slot.start.getDay()
-    const sH = slot.start.getHours()
-    const sM = slot.start.getMinutes()
-    const durationMs = slot.end.getTime() - slot.start.getTime()
+    const ptSlotStart = utcToPt(slot.start)
+    const ptSlotEnd   = utcToPt(slot.end)
+    const targetDow = ptSlotStart.getDay()
+    const sH = ptSlotStart.getHours()
+    const sM = ptSlotStart.getMinutes()
+    const durationMs = ptSlotEnd.getTime() - ptSlotStart.getTime()
+
+    // Iterate every PT calendar day in the slot's PT month
+    const ptMonthStart = new Date(ptSlotStart.getFullYear(), ptSlotStart.getMonth(), 1)
+    const ptMonthEnd   = new Date(ptSlotStart.getFullYear(), ptSlotStart.getMonth() + 1, 1)
 
     const out: { start: Date; end: Date }[] = []
-    for (let d = new Date(monthStart); d < monthEnd; d.setDate(d.getDate() + 1)) {
+    for (let d = new Date(ptMonthStart); d < ptMonthEnd; d.setDate(d.getDate() + 1)) {
       if (d.getDay() !== targetDow) continue
-      const cellStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), sH, sM, 0)
-      const cellEnd = new Date(cellStart.getTime() + durationMs)
-      out.push({ start: cellStart, end: cellEnd })
+      const ptCellStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), sH, sM, 0)
+      const ptCellEnd   = new Date(ptCellStart.getTime() + durationMs)
+      out.push({
+        start: ptWallClockToUtc(ptCellStart),
+        end:   ptWallClockToUtc(ptCellEnd),
+      })
     }
     return out
   }
@@ -192,24 +199,29 @@ export function StreamEventModal({
     setSaving(true)
     setError(null)
 
-    const monthStart = new Date(slot.start.getFullYear(), slot.start.getMonth(), 1)
-    const monthEnd   = new Date(slot.start.getFullYear(), slot.start.getMonth() + 1, 1)
-    const targetDow  = slot.start.getDay()
-    const sH = slot.start.getHours()
-    const sM = slot.start.getMinutes()
+    // PT-anchored month boundaries + weekday/time-of-day comparisons
+    const ptSlotStart = utcToPt(slot.start)
+    const targetDow = ptSlotStart.getDay()
+    const sH = ptSlotStart.getHours()
+    const sM = ptSlotStart.getMinutes()
     const durationMs = slot.end.getTime() - slot.start.getTime()
-    const nowMs = Date.now()
+    const nowMs = nowPtAsUtc().getTime()
+
+    const ptMonthStart = new Date(ptSlotStart.getFullYear(), ptSlotStart.getMonth(), 1)
+    const ptMonthEnd   = new Date(ptSlotStart.getFullYear(), ptSlotStart.getMonth() + 1, 1)
+    const monthStartUtc = ptWallClockToUtc(ptMonthStart)
+    const monthEndUtc   = ptWallClockToUtc(ptMonthEnd)
 
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
 
-    // Fetch all candidate streams in the month
+    // Fetch all candidate streams in the PT month
     const { data: candidates, error: fetchErr } = await supabase
       .from('streams')
       .select('id, start_time')
       .eq('brand_id', brandId)
-      .gte('start_time', monthStart.toISOString())
-      .lt('start_time', monthEnd.toISOString())
+      .gte('start_time', monthStartUtc.toISOString())
+      .lt('start_time', monthEndUtc.toISOString())
 
     if (fetchErr) {
       setSaving(false)
@@ -217,13 +229,14 @@ export function StreamEventModal({
       return
     }
 
-    // Match weekday + time-of-day, then split into future (deletable) vs past (kept).
+    // Match PT weekday + PT time-of-day, then split into future vs past.
     // Past shifts are the historical record and must never be deleted.
     let pastSkipped = 0
     const idsToDelete: string[] = []
     for (const s of candidates ?? []) {
       const sd = new Date(s.start_time)
-      if (sd.getDay() !== targetDow || sd.getHours() !== sH || sd.getMinutes() !== sM) continue
+      const ptSd = utcToPt(sd)
+      if (ptSd.getDay() !== targetDow || ptSd.getHours() !== sH || ptSd.getMinutes() !== sM) continue
       const sEndMs = sd.getTime() + durationMs
       if (sEndMs <= nowMs) {
         pastSkipped++
@@ -271,7 +284,7 @@ export function StreamEventModal({
     // slot in the same calendar month. Each call is validated by book_shift
     // (past, blocked, taken-by-other, conflicts, chain rule), so individual
     // dates may be skipped.
-    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > Date.now())
+    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > nowPtAsUtc().getTime())
 
     let booked = 0
     let skipped = 0
@@ -286,7 +299,7 @@ export function StreamEventModal({
       })
       if (error) {
         skipped++
-        errors.push(`${format(s, 'MMM d')}: ${error.message}`)
+        errors.push(`${formatPT(s, 'MMM d')}: ${error.message}`)
       } else {
         booked++
         bookedStartTimes.push(s.toISOString())
@@ -332,7 +345,7 @@ export function StreamEventModal({
 
     // Mirror the booking flow: cancel every matching weekday slot in this
     // calendar month that this host has claimed.
-    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > Date.now())
+    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > nowPtAsUtc().getTime())
     const targetTimes = dates.map(d => d.start.toISOString())
 
     if (targetTimes.length === 0) {
@@ -399,7 +412,7 @@ export function StreamEventModal({
             <div className="rounded-md border border-border bg-secondary/30 px-3 py-3 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-foreground">
-                  {format(slot.start, 'EEEE, MMMM d')}
+                  {formatPT(slot.start, 'EEEE, MMMM d')}
                 </p>
                 {isPast && (
                   <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
@@ -408,7 +421,7 @@ export function StreamEventModal({
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                {format(slot.start, 'h:mm a')} – {format(slot.end, 'h:mm a')}
+                {formatPT(slot.start, 'h:mm a')} – {formatPT(slot.end, 'h:mm a')}
               </p>
               <p className="inline-flex items-center gap-1 text-xs text-primary font-medium pt-0.5">
                 <DollarSign className="w-3 h-3" />
@@ -425,11 +438,11 @@ export function StreamEventModal({
                   <p className="text-muted-foreground mt-0.5">
                     Be on set by{' '}
                     <span className="text-foreground font-medium">
-                      {format(new Date(slot.start.getTime() - 30 * 60_000), 'h:mm a')}
+                      {formatPT(new Date(slot.start.getTime() - 30 * 60_000), 'h:mm a')}
                     </span>{' '}
                     so we&apos;re ready to go live at{' '}
                     <span className="text-foreground font-medium">
-                      {format(slot.start, 'h:mm a')}
+                      {formatPT(slot.start, 'h:mm a')}
                     </span>.
                   </p>
                 </div>
@@ -562,8 +575,8 @@ export function StreamEventModal({
               const claimedByMe = existingStream?.host_id === currentHost.id
               const taken = !!existingStream?.host_id && !claimedByMe
               if (claimedByMe) {
-                const cancelWeekday = format(slot.start, 'EEEE')
-                const cancelMonth = format(slot.start, 'MMMM')
+                const cancelWeekday = formatPT(slot.start, 'EEEE')
+                const cancelMonth = formatPT(slot.start, 'MMMM')
                 return (
                   <div className="flex flex-col items-end gap-1">
                     <Button
@@ -582,9 +595,9 @@ export function StreamEventModal({
                 )
               }
               if (taken) return null // someone else has it; no button
-              const matchCount = matchingDatesInMonth().filter(({ end }) => end.getTime() > Date.now()).length
-              const weekday = format(slot.start, 'EEEE')
-              const monthName = format(slot.start, 'MMMM')
+              const matchCount = matchingDatesInMonth().filter(({ end }) => end.getTime() > nowPtAsUtc().getTime()).length
+              const weekday = formatPT(slot.start, 'EEEE')
+              const monthName = formatPT(slot.start, 'MMMM')
               return (
                 <div className="flex flex-col items-end gap-1">
                   <Button onClick={handleBookShift} disabled={saving} className="gap-1.5">
@@ -634,7 +647,7 @@ export function StreamEventModal({
                 className="gap-1.5 bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 <CalendarRange className="w-3.5 h-3.5" />
-                {saving ? 'Clearing…' : `Every ${format(slot.start, 'EEEE')} in ${format(slot.start, 'MMMM')}`}
+                {saving ? 'Clearing…' : `Every ${formatPT(slot.start, 'EEEE')} in ${formatPT(slot.start, 'MMMM')}`}
               </Button>
             </div>
           </AlertDialogFooter>

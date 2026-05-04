@@ -24,6 +24,11 @@ import {
   formatCents,
   buildRateLookup,
   rateKey,
+  APP_TIMEZONE,
+  formatPT,
+  utcToPt,
+  ptWallClockToUtc,
+  nowPtAsUtc,
 } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -117,15 +122,18 @@ export function CalendarView({
     return m
   }, [initialShiftOverrides])
 
-  const dateKey = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  // Date keys are derived from the cell's PT calendar date so they line up with
+  // brand_shift_overrides.shift_date (which is the PT-relative civil date).
+  const dateKey = (d: Date) => formatPT(d, 'yyyy-MM-dd')
 
   // Effective rate for a specific cell: override beats default
   const effectiveRate = useCallback((d: Date, idx: number): number => {
     const key = `${dateKey(d)}-${idx}`
     const override = overrideMap.get(key)
     if (override !== undefined) return override
-    return rates.get(d.getDay(), idx)
+    // Day-of-week is also PT-derived
+    const dow = utcToPt(d).getDay()
+    return rates.get(dow, idx)
   }, [overrideMap, rates])
 
   // Active visible date range (driven by FC's datesSet)
@@ -140,19 +148,23 @@ export function CalendarView({
   }
 
   function snapToCell(date: Date): { start: Date; end: Date; dow: number; idx: number } | null {
-    const slotMins = date.getHours() * 60 + date.getMinutes()
+    // Treat all wall-clock math in PT — admin scheduling is authored in PT and
+    // viewers in other TZs need to see the same wall-clock times.
+    const ptDate = utcToPt(date)
+    const slotMins = ptDate.getHours() * 60 + ptDate.getMinutes()
     const idx = blockIndexFromMinutes(slotMins)
     if (idx < 0 || idx >= blockCount) return null
-    const dow = date.getDay()
+    const dow = ptDate.getDay()
     const blockStartMins = shift.dayStartMinutes + idx * shift.blockSizeMinutes
     const blockEndMins   = shift.dayStartMinutes + (idx + 1) * shift.blockSizeMinutes
 
-    // Anchor at local midnight, then add minutes via millisecond math
-    // (avoids setMinutes adding to existing hours)
-    const midnight = new Date(date)
-    midnight.setHours(0, 0, 0, 0)
-    const start = new Date(midnight.getTime() + blockStartMins * 60_000)
-    const end   = new Date(midnight.getTime() + blockEndMins   * 60_000)
+    // Anchor at PT midnight, then add minutes; convert back to a real UTC instant
+    const ptMidnight = new Date(ptDate)
+    ptMidnight.setHours(0, 0, 0, 0)
+    const startPt = new Date(ptMidnight.getTime() + blockStartMins * 60_000)
+    const endPt   = new Date(ptMidnight.getTime() + blockEndMins   * 60_000)
+    const start = ptWallClockToUtc(startPt)
+    const end   = ptWallClockToUtc(endPt)
 
     return { start, end, dow, idx }
   }
@@ -165,28 +177,33 @@ export function CalendarView({
     [streams]
   )
 
-  // For chain-booking: per-date set of booked block_indexes
+  // For chain-booking: per-PT-date set of booked block_indexes.
+  // Skip rows whose derived idx is outside the brand's day window — those are
+  // legacy/corrupted timestamps (e.g. from a previous TZ migration round-trip)
+  // that would otherwise pollute the chain-rule logic.
   const bookedByDate = useMemo(() => {
     const m = new Map<string, Set<number>>()
     for (const s of streams) {
-      const d = new Date(s.start_time)
+      const d = utcToPt(new Date(s.start_time))
       const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
       const slotMins = d.getHours() * 60 + d.getMinutes()
       const idx = Math.round((slotMins - shift.dayStartMinutes) / shift.blockSizeMinutes)
+      if (idx < 0 || idx >= blockCount) continue
       if (!m.has(key)) m.set(key, new Set())
       m.get(key)!.add(idx)
     }
     return m
-  }, [streams, shift.dayStartMinutes, shift.blockSizeMinutes])
+  }, [streams, shift.dayStartMinutes, shift.blockSizeMinutes, blockCount])
 
   // True when a cell is locked by the chain rule:
-  //   - The day has at least one booking
+  //   - The PT day has at least one booking
   //   - This cell isn't itself booked
   //   - Not adjacent to any booking (idx ± 1)
   // Admins bypass the rule entirely.
   const chainLockedAt = useCallback((date: Date, blockIdx: number): boolean => {
     if (isAdmin) return false
-    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+    const pt = utcToPt(date)
+    const key = `${pt.getFullYear()}-${pt.getMonth()}-${pt.getDate()}`
     const booked = bookedByDate.get(key)
     if (!booked || booked.size === 0) return false
     if (booked.has(blockIdx)) return false
@@ -219,14 +236,15 @@ export function CalendarView({
   const conflictEvents: EventInput[] = useMemo(() => {
     if (isAdmin || parsedConflicts.length === 0 || !isTimeGridView) return []
     const out: EventInput[] = []
-    // Walk each conflict; generate per-block overlays on our grid for that day
+    // Walk each conflict; generate per-block overlays on our grid for that day.
+    // Anchor at PT midnight so cross-brand conflicts line up with our PT grid.
     for (const c of parsedConflicts) {
-      const dayAnchor = new Date(c.startMs)
-      dayAnchor.setHours(0, 0, 0, 0)
-      const midnightMs = dayAnchor.getTime()
+      const ptAnchor = utcToPt(new Date(c.startMs))
+      ptAnchor.setHours(0, 0, 0, 0)
+      const midnightUtcMs = ptWallClockToUtc(ptAnchor).getTime()
       for (let idx = 0; idx < blockCount; idx++) {
-        const blockStart = midnightMs + (shift.dayStartMinutes + idx * shift.blockSizeMinutes) * 60_000
-        const blockEnd   = midnightMs + (shift.dayStartMinutes + (idx + 1) * shift.blockSizeMinutes) * 60_000
+        const blockStart = midnightUtcMs + (shift.dayStartMinutes + idx * shift.blockSizeMinutes) * 60_000
+        const blockEnd   = midnightUtcMs + (shift.dayStartMinutes + (idx + 1) * shift.blockSizeMinutes) * 60_000
         if (c.startMs < blockEnd && c.endMs > blockStart) {
           out.push({
             start: new Date(blockStart).toISOString(),
@@ -290,7 +308,7 @@ export function CalendarView({
     // or chain-locked slots (must be adjacent to an existing booking)
     if (!isAdmin && rates.isBlocked(cell.dow, cell.idx)) return
     if (!isAdmin && conflictAt(cell.start.getTime(), cell.end.getTime())) return
-    if (!isAdmin && cell.end.getTime() <= Date.now()) return
+    if (!isAdmin && cell.end.getTime() <= nowPtAsUtc().getTime()) return
     if (!isAdmin && chainLockedAt(cell.start, cell.idx)) return
     const rateCents = rates.get(cell.dow, cell.idx)
     const existing = streams.find(
@@ -321,7 +339,7 @@ export function CalendarView({
     if (selectMode) {
       // Group selection is for future shifts only
       const cellEnd = clickInfo.event.end
-      if (cellEnd && cellEnd.getTime() <= Date.now()) return
+      if (cellEnd && cellEnd.getTime() <= nowPtAsUtc().getTime()) return
 
       const cell = snapToCell(start)
       if (!cell) return
@@ -356,7 +374,7 @@ export function CalendarView({
       const cell = snapToCell(info.date)
       if (!cell) return
       // Group selection is for future shifts only
-      if (cell.end.getTime() <= Date.now()) return
+      if (cell.end.getTime() <= nowPtAsUtc().getTime()) return
       const key = rateKey(cell.dow, cell.idx)
       setSelectedCells(prev => {
         const next = new Set(prev)
@@ -405,11 +423,13 @@ export function CalendarView({
     if (eventInfo.event.extendedProps.__rateLabel) {
       const fallbackCents = eventInfo.event.extendedProps.rateCents as number
       const isBlocked = eventInfo.event.extendedProps.isBlocked as boolean
-      // Recompute rate from the specific date so per-date overrides are respected
+      // Recompute rate from the specific date so per-date overrides are respected.
+      // Use PT-derived hours/minutes since rates are stored against PT calendar dates.
       const cellStartDate = eventInfo.event.start
       let cents = fallbackCents
       if (cellStartDate) {
-        const slotMinutes = cellStartDate.getHours() * 60 + cellStartDate.getMinutes()
+        const ptStart = utcToPt(cellStartDate)
+        const slotMinutes = ptStart.getHours() * 60 + ptStart.getMinutes()
         const idx = Math.round((slotMinutes - shift.dayStartMinutes) / shift.blockSizeMinutes)
         cents = effectiveRate(cellStartDate, idx)
       }
@@ -418,17 +438,18 @@ export function CalendarView({
       // unless a stream actually happened here, in which case we let the
       // booked-shift event own that cell visually.
       const cellEnd = eventInfo.event.end
-      const isPast = !!cellEnd && cellEnd.getTime() <= Date.now()
+      const isPast = !!cellEnd && cellEnd.getTime() <= nowPtAsUtc().getTime()
       const cellStartMs = eventInfo.event.start?.getTime()
       const cellEndMs = cellEnd?.getTime()
       const hasStream = cellStartMs !== undefined && occupiedSlotTimes.has(cellStartMs)
       const hasConflict = cellStartMs !== undefined && cellEndMs !== undefined && !!conflictAt(cellStartMs, cellEndMs)
       const hideRate = (isPast && hasStream) || hasConflict
 
-      // Chain-lock check (host only, future, not blocked)
+      // Chain-lock check (host only, future, not blocked) — PT-derived index
       const cellStart = eventInfo.event.start
-      const isChainLocked = !isAdmin && !isPast && !isBlocked && !!cellStart &&
-        chainLockedAt(cellStart, Math.round(((cellStart.getHours() * 60 + cellStart.getMinutes()) - shift.dayStartMinutes) / shift.blockSizeMinutes))
+      const ptCellStart = cellStart ? utcToPt(cellStart) : null
+      const isChainLocked = !isAdmin && !isPast && !isBlocked && !!cellStart && !!ptCellStart &&
+        chainLockedAt(cellStart, Math.round(((ptCellStart.getHours() * 60 + ptCellStart.getMinutes()) - shift.dayStartMinutes) / shift.blockSizeMinutes))
 
       return (
         <div className="absolute inset-0 pointer-events-none">
@@ -459,7 +480,7 @@ export function CalendarView({
     }
     // Real stream event — render style differs by view
     const streamEnd = eventInfo.event.end
-    const streamIsPast = !!streamEnd && streamEnd.getTime() <= Date.now()
+    const streamIsPast = !!streamEnd && streamEnd.getTime() <= nowPtAsUtc().getTime()
     const isMonth = eventInfo.view.type === 'dayGridMonth'
 
     if (isMonth) {
@@ -490,10 +511,14 @@ export function CalendarView({
   function renderSlotLabel(arg: SlotLabelContentArg) {
     const start = arg.date
     const end = new Date(start.getTime() + shift.blockSizeMinutes * 60_000)
-    const fmt = (d: Date) => d.getMinutes() === 0 ? format(d, 'h a') : format(d, 'h:mm a')
+    // Format slot times in PT — FullCalendar's timeZone prop renders the grid
+    // in PT, but arg.date is a real UTC instant; format it explicitly in PT.
+    const ptStart = utcToPt(start)
+    const ptEnd   = utcToPt(end)
+    const fmt = (pt: Date) => pt.getMinutes() === 0 ? format(pt, 'h a') : format(pt, 'h:mm a')
     return (
       <span className="text-[0.7rem] font-medium text-foreground pr-1 whitespace-nowrap">
-        {fmt(start)} – {fmt(end)}
+        {fmt(ptStart)} – {fmt(ptEnd)}
       </span>
     )
   }
@@ -521,14 +546,18 @@ export function CalendarView({
     })
   }
 
-  // Compute the specific date in the active week for a given day-of-week
+  // Returns the UTC instant for PT-midnight of the target weekday in the
+  // active week. Callers can then run `dateKey(returned)` (which is PT-aware)
+  // or any UTC-based math.
   function dateForDow(dow: number): Date | null {
     if (!activeRange) return null
-    const startDow = activeRange.start.getDay()
+    const ptStart = utcToPt(activeRange.start)
+    const startDow = ptStart.getDay()
     const offset = (dow - startDow + 7) % 7
-    const d = new Date(activeRange.start)
-    d.setDate(d.getDate() + offset)
-    return d
+    const ptTarget = new Date(ptStart)
+    ptTarget.setDate(ptTarget.getDate() + offset)
+    ptTarget.setHours(0, 0, 0, 0)
+    return ptWallClockToUtc(ptTarget)
   }
 
   async function applyBulkRate() {
@@ -693,6 +722,7 @@ export function CalendarView({
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
           initialView="timeGridWeek"
+          timeZone={APP_TIMEZONE}
           headerToolbar={{
             left: 'prev,next today',
             center: 'title',
@@ -710,9 +740,12 @@ export function CalendarView({
             setActiveRange({ start: arg.view.activeStart, end: arg.view.activeEnd })
           }}
           dayCellClassNames={(arg) => {
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            return arg.date.getTime() < today.getTime() ? ['past-day'] : []
+            // PT "today" boundary: anything ending before now (in UTC instants)
+            // is past. arg.date is the UTC instant for the day's start in PT.
+            const ptNow = utcToPt(new Date())
+            ptNow.setHours(0, 0, 0, 0)
+            const todayUtcMs = ptWallClockToUtc(ptNow).getTime()
+            return arg.date.getTime() < todayUtcMs ? ['past-day'] : []
           }}
           eventContent={renderEventContent}
           eventClassNames={(arg) => {
@@ -720,7 +753,7 @@ export function CalendarView({
             const props = arg.event.extendedProps
             const end = arg.event.end
             const start = arg.event.start
-            const isPast = !!end && end.getTime() <= Date.now()
+            const isPast = !!end && end.getTime() <= nowPtAsUtc().getTime()
 
             if (props.__conflict) out.push('conflict-cell')
             if (props.__rateLabel) {
@@ -729,7 +762,8 @@ export function CalendarView({
               if (isPast) out.push('past-cell')
               // Chain lock only applies to bookable future cells for non-admins
               if (!isAdmin && !isPast && !props.isBlocked && start) {
-                const slotMins = start.getHours() * 60 + start.getMinutes()
+                const ptStart = utcToPt(start)
+                const slotMins = ptStart.getHours() * 60 + ptStart.getMinutes()
                 const idx = Math.round((slotMins - shift.dayStartMinutes) / shift.blockSizeMinutes)
                 if (chainLockedAt(start, idx)) out.push('chain-locked-cell')
               }
@@ -739,6 +773,26 @@ export function CalendarView({
             return out
           }}
           nowIndicator={true}
+          now={() => {
+            // FC is set to timeZone="UTC", but our stored times are
+            // PT-wall-clock encoded as UTC. The now-indicator must follow
+            // the same convention: produce the *actual* PT wall-clock as
+            // UTC fields so it lines up with the slot grid.
+            const real = new Date()
+            const ptNow = new Intl.DateTimeFormat('en-US', {
+              timeZone: 'America/Los_Angeles',
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit', second: '2-digit',
+              hour12: false,
+            }).formatToParts(real)
+            const part = (t: string) => Number(ptNow.find(p => p.type === t)!.value)
+            return new Date(Date.UTC(
+              part('year'), part('month') - 1, part('day'),
+              // formatToParts gives 24h "00"–"23" for hour
+              part('hour') === 24 ? 0 : part('hour'),
+              part('minute'), part('second')
+            ))
+          }}
           slotDuration={minutesToTimeString(shift.blockSizeMinutes)}
           slotLabelInterval={minutesToTimeString(shift.blockSizeMinutes)}
           slotLabelContent={renderSlotLabel}
