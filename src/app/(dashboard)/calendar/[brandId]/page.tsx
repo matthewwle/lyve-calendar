@@ -117,6 +117,16 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
       .filter((c): c is Conflict => c !== null)
   }
 
+  // Pending cancellation requests submitted by THIS user — used to render the
+  // subtle "Cancel pending" badge on their own tiles.
+  const { data: pendingCancelRows } = await supabase
+    .from('shift_cancellation_requests')
+    .select('stream_id')
+    .eq('host_user_id', user.id)
+    .eq('status', 'pending')
+  const pendingCancelStreamIds = ((pendingCancelRows as { stream_id: string }[] | null) ?? [])
+    .map(r => r.stream_id)
+
   return (
     <div className="h-full flex flex-col">
       <CalendarHeader brand={brand} shiftRates={shiftRates} canEdit={isAdmin} />
@@ -137,6 +147,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
           currentUserId={user.id}
           currentHost={currentHost}
           conflicts={conflicts}
+          pendingCancelStreamIds={pendingCancelStreamIds}
         />
       </div>
     </div>

@@ -189,6 +189,9 @@ export interface Database {
             | 'brand_request'
             | 'brand_request_approved'
             | 'brand_request_denied'
+            | 'cancellation_request'
+            | 'cancellation_request_approved'
+            | 'cancellation_request_denied'
           actor_host_id: string | null
           host_name: string
           brand_id: string | null
@@ -196,6 +199,7 @@ export interface Database {
           shift_start: string | null
           shift_end: string | null
           request_id: string | null
+          body: string | null
           is_read: boolean
           created_at: string
         }
@@ -208,6 +212,9 @@ export interface Database {
             | 'brand_request'
             | 'brand_request_approved'
             | 'brand_request_denied'
+            | 'cancellation_request'
+            | 'cancellation_request_approved'
+            | 'cancellation_request_denied'
           actor_host_id?: string | null
           host_name: string
           brand_id?: string | null
@@ -215,11 +222,39 @@ export interface Database {
           shift_start?: string | null
           shift_end?: string | null
           request_id?: string | null
+          body?: string | null
           is_read?: boolean
           created_at?: string
         }
         Update: {
           is_read?: boolean
+        }
+      }
+      shift_cancellation_requests: {
+        Row: {
+          id: string
+          stream_id: string
+          host_user_id: string
+          reason: string | null
+          status: 'pending' | 'approved' | 'denied'
+          created_at: string
+          decided_by: string | null
+          decided_at: string | null
+        }
+        Insert: {
+          id?: string
+          stream_id: string
+          host_user_id: string
+          reason?: string | null
+          status?: 'pending' | 'approved' | 'denied'
+          created_at?: string
+          decided_by?: string | null
+          decided_at?: string | null
+        }
+        Update: {
+          status?: 'pending' | 'approved' | 'denied'
+          decided_by?: string | null
+          decided_at?: string | null
         }
       }
       brand_host_requests: {
@@ -302,6 +337,7 @@ export type BrandShiftOverride = Database['public']['Tables']['brand_shift_overr
 export type BrandHost          = Database['public']['Tables']['brand_hosts']['Row']
 export type Notification       = Database['public']['Tables']['notifications']['Row']
 export type BrandHostRequest   = Database['public']['Tables']['brand_host_requests']['Row']
+export type ShiftCancellationRequest = Database['public']['Tables']['shift_cancellation_requests']['Row']
 
 export interface StreamWithRelations extends Stream {
   host:     { id: string; name: string } | null

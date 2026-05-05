@@ -59,6 +59,8 @@ interface CalendarViewProps {
   currentUserId: string
   currentHost: { id: string; name: string } | null
   conflicts: ConflictBooking[]
+  /** Stream ids the current user has a pending cancellation request for. */
+  pendingCancelStreamIds?: string[]
 }
 
 interface SelectedSlot {
@@ -80,7 +82,12 @@ export function CalendarView({
   currentUserId,
   currentHost,
   conflicts,
+  pendingCancelStreamIds = [],
 }: CalendarViewProps) {
+  const pendingCancelSet = useMemo(
+    () => new Set(pendingCancelStreamIds),
+    [pendingCancelStreamIds],
+  )
   const [streams, setStreams] = useState<StreamWithRelations[]>(initialStreams)
   const { toast } = useToast()
   const router = useRouter()
@@ -778,6 +785,11 @@ export function CalendarView({
             } else if (isPast && !props.__conflict) {
               out.push('past-stream')
             }
+            // Stream tile owned by current user with a pending cancellation
+            // request: subtle dashed outline so the host knows it's in flight.
+            if (!props.__rateLabel && !props.__conflict && arg.event.id && pendingCancelSet.has(arg.event.id)) {
+              out.push('pending-cancel')
+            }
             return out
           }}
           nowIndicator={true}
@@ -906,6 +918,10 @@ export function CalendarView({
         isAdmin={isAdmin}
         currentUserId={currentUserId}
         currentHost={currentHost}
+        hasPendingCancel={
+          !!selectedSlot?.existingStream &&
+          pendingCancelSet.has(selectedSlot.existingStream.id)
+        }
       />
     </div>
   )

@@ -106,11 +106,15 @@ export function NotificationBell({ userId, initial }: NotificationBellProps) {
   async function decide(n: Notification, approve: boolean) {
     if (!n.request_id) return
     // Optimistically remove this row from the local list. The RPC will also
-    // delete every brand_request notification that points at the same
-    // request_id, so the realtime DELETE event mirrors this for other tabs.
+    // delete every matching pending notification by request_id, so the realtime
+    // DELETE event mirrors this for other tabs.
     setItems(prev => prev.filter(i => i.id !== n.id))
     const supabase = createClient()
-    const { error } = await supabase.rpc('decide_brand_request', {
+    // Pick the right decision RPC based on the notification type.
+    const rpcName = n.type === 'cancellation_request'
+      ? 'decide_cancellation_request'
+      : 'decide_brand_request'
+    const { error } = await supabase.rpc(rpcName, {
       p_request_id: n.request_id,
       p_approve: approve,
     })
@@ -222,9 +226,14 @@ function NotificationRow({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm text-foreground leading-snug">{meta.body}</p>
+          {n.body && (n.type === 'cancellation_request') && (
+            <p className="mt-1 text-xs text-muted-foreground italic leading-snug">
+              &ldquo;{n.body}&rdquo;
+            </p>
+          )}
           <p className="mt-1 text-[11px] text-muted-foreground">{relative}</p>
 
-          {n.type === 'brand_request' && (
+          {(n.type === 'brand_request' || n.type === 'cancellation_request') && (
             <div className="mt-2 flex gap-2">
               <button
                 type="button"
@@ -321,6 +330,54 @@ function renderMeta(n: Notification): {
           </>
         ),
       }
+    case 'cancellation_request': {
+      const dateLabel = n.shift_start ? formatPT(n.shift_start, 'EEE, MMM d') : ''
+      const startLabel = n.shift_start ? formatPT(n.shift_start, 'h:mm a') : ''
+      const endLabel = n.shift_end ? formatPT(n.shift_end, 'h:mm a') : ''
+      return {
+        Icon: CalendarX2,
+        iconBg: 'bg-muted text-muted-foreground',
+        body: (
+          <>
+            <span className="font-semibold">{n.host_name}</span>{' '}
+            <span className="text-muted-foreground">wants to cancel</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>{' '}
+            <span className="text-muted-foreground">for</span>{' '}
+            <span className="text-muted-foreground">
+              {dateLabel} · {startLabel} – {endLabel}
+            </span>
+          </>
+        ),
+      }
+    }
+    case 'cancellation_request_approved': {
+      const dateLabel = n.shift_start ? formatPT(n.shift_start, 'EEE, MMM d') : ''
+      return {
+        Icon: CheckCircle2,
+        iconBg: 'bg-primary/15 text-primary',
+        body: (
+          <>
+            <span className="text-muted-foreground">Your cancellation for</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>{' '}
+            <span className="text-muted-foreground">on {dateLabel} was approved</span>
+          </>
+        ),
+      }
+    }
+    case 'cancellation_request_denied': {
+      const dateLabel = n.shift_start ? formatPT(n.shift_start, 'EEE, MMM d') : ''
+      return {
+        Icon: XCircle,
+        iconBg: 'bg-muted text-muted-foreground',
+        body: (
+          <>
+            <span className="text-muted-foreground">Your cancellation for</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>{' '}
+            <span className="text-muted-foreground">on {dateLabel} was denied</span>
+          </>
+        ),
+      }
+    }
     default: {
       // Compile-time exhaustiveness check — adding a new notification type
       // without updating this switch will fail typecheck here.

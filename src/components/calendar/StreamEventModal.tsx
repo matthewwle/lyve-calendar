@@ -55,6 +55,9 @@ interface StreamEventModalProps {
   isAdmin: boolean
   currentUserId: string
   currentHost: { id: string; name: string } | null
+  /** True if the current user already has a pending cancellation request
+   *  for this stream — disables the request-cancel button + shows status. */
+  hasPendingCancel?: boolean
 }
 
 export function StreamEventModal({
@@ -70,6 +73,7 @@ export function StreamEventModal({
   isAdmin,
   currentUserId,
   currentHost,
+  hasPendingCancel = false,
 }: StreamEventModalProps) {
   const router = useRouter()
   const { toast } = useToast()
@@ -80,12 +84,14 @@ export function StreamEventModal({
   const [saving, setSaving] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cancelReason, setCancelReason] = useState<string>('')
 
   useEffect(() => {
     if (!isOpen) return
     setHostId(existingStream?.host_id ?? '')
     setProducerId(existingStream?.producer_id ?? '')
     setNotes(existingStream?.notes ?? '')
+    setCancelReason('')
     setError(null)
   }, [isOpen, existingStream])
 
@@ -336,65 +342,27 @@ export function StreamEventModal({
     onClose()
   }
 
-  async function handleUnbookShift() {
-    if (!slot || !currentHost) return
+  // Hosts can no longer cancel directly. They submit a single-shift
+  // cancellation request that flows through the admin notification bell.
+  async function handleRequestCancel() {
+    if (!slot || !currentHost || !existingStream) return
     setSaving(true)
     setError(null)
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
 
-    // Mirror the booking flow: cancel every matching weekday slot in this
-    // calendar month that this host has claimed.
-    const dates = matchingDatesInMonth().filter(({ end }) => end.getTime() > nowPtAsUtc().getTime())
-    const targetTimes = dates.map(d => d.start.toISOString())
-
-    if (targetTimes.length === 0) {
-      setSaving(false)
-      setError('Nothing to cancel.')
-      return
-    }
-
-    // Fetch all my matching streams in one query so we can mirror the
-    // server's delete-vs-clear behavior in local state.
-    const { data: myStreamsData } = await supabase
-      .from('streams')
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
-      .eq('brand_id', brandId)
-      .eq('host_id', currentHost.id)
-      .in('start_time', targetTimes)
-
-    const myStreams = (myStreamsData ?? []) as StreamWithRelations[]
-
-    let cancelled = 0
-    let skipped = 0
-    for (const s of myStreams) {
-      const { error } = await supabase.rpc('unbook_shift', {
-        p_brand_id:   brandId,
-        p_start_time: s.start_time,
-      })
-      if (error) {
-        skipped++
-        continue
-      }
-      cancelled++
-      if (s.producer_id === null) {
-        onDelete?.(s.id)
-      } else {
-        onSave({ ...s, host_id: null, host: null })
-      }
-    }
+    const { error } = await supabase.rpc('request_shift_cancellation', {
+      p_stream_id: existingStream.id,
+      p_reason: cancelReason.trim() || null,
+    })
 
     setSaving(false)
-
-    if (cancelled === 0) {
-      setError('No shifts could be cancelled.')
+    if (error) {
+      setError(error.message)
       return
     }
 
-    toast({
-      title: `Cancelled ${cancelled} shift${cancelled === 1 ? '' : 's'}`,
-      description: skipped > 0 ? `${skipped} could not be cancelled.` : undefined,
-    })
+    toast({ title: 'Cancellation requested', description: 'An admin will review your request.' })
     router.refresh()
     onClose()
   }
@@ -575,22 +543,43 @@ export function StreamEventModal({
               const claimedByMe = existingStream?.host_id === currentHost.id
               const taken = !!existingStream?.host_id && !claimedByMe
               if (claimedByMe) {
-                const cancelWeekday = formatPT(slot.start, 'EEEE')
-                const cancelMonth = formatPT(slot.start, 'MMMM')
+                if (hasPendingCancel) {
+                  return (
+                    <div className="flex flex-col items-end gap-1 w-full">
+                      <span className="text-xs text-muted-foreground italic self-end">
+                        Cancellation request pending — waiting on admin review.
+                      </span>
+                    </div>
+                  )
+                }
                 return (
-                  <div className="flex flex-col items-end gap-1">
-                    <Button
-                      variant="outline"
-                      onClick={handleUnbookShift}
+                  <div className="flex flex-col gap-2 w-full">
+                    <Label htmlFor="cancel-reason" className="text-xs text-muted-foreground">
+                      Reason <span className="text-muted-foreground font-normal">(optional)</span>
+                    </Label>
+                    <Textarea
+                      id="cancel-reason"
+                      value={cancelReason}
+                      onChange={e => setCancelReason(e.target.value)}
+                      placeholder="Anything the admin should know?"
+                      rows={2}
+                      maxLength={500}
                       disabled={saving}
-                      className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      <XIcon className="w-3.5 h-3.5" />
-                      {saving ? 'Cancelling…' : `Cancel every ${cancelWeekday} in ${cancelMonth}`}
-                    </Button>
-                    <span className="text-[10px] text-muted-foreground">
-                      Removes you from every {cancelWeekday} this month at this time
-                    </span>
+                    />
+                    <div className="flex flex-col items-end gap-1">
+                      <Button
+                        variant="outline"
+                        onClick={handleRequestCancel}
+                        disabled={saving}
+                        className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <XIcon className="w-3.5 h-3.5" />
+                        {saving ? 'Sending…' : 'Request cancellation'}
+                      </Button>
+                      <span className="text-[10px] text-muted-foreground">
+                        An admin will review and approve or deny this request.
+                      </span>
+                    </div>
                   </div>
                 )
               }

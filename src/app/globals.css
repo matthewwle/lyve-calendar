@@ -245,6 +245,15 @@
   opacity: 1;
 }
 
+/* Booked shift with a pending cancellation request from the host: subtle
+   dashed outline so the tile reads "in flight" without losing the orange
+   booked appearance. The shift is still booked until admin acts. */
+.fc .fc-event.pending-cancel {
+  outline: 2px dashed hsl(0 0% 35% / 0.55);
+  outline-offset: -3px;
+  opacity: 0.92;
+}
+
 /* Blocked cells: cursor cue reinforces "you can't interact with this" */
 .fc .fc-bg-event.blocked-cell {
   cursor: not-allowed;
