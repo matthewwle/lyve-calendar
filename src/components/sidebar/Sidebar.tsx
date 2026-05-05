@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/brand/BrandLogo'
+import { RequestBrandsButton } from './RequestBrandsButton'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -21,6 +22,7 @@ interface SidebarProps {
   viewingAsHost: boolean
   hasHostProfile: boolean
   headshotUrl?: string | null
+  userId: string
 }
 
 const adminLinks = [
@@ -31,7 +33,7 @@ const adminLinks = [
   { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
-export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile, headshotUrl }: SidebarProps) {
+export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile, headshotUrl, userId }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   // Effective admin = real admin AND not currently impersonating a host
@@ -110,6 +112,10 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
             <Plus className="w-4 h-4 flex-shrink-0" />
             Add Brand
           </Link>
+        )}
+
+        {!isAdmin && (
+          <RequestBrandsButton userId={userId} />
         )}
 
         {/* My Shifts (only when the user is linked to a host record) */}

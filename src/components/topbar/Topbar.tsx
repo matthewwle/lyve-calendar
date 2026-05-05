@@ -3,13 +3,13 @@ import { NotificationBell } from './NotificationBell'
 import type { Notification } from '@/lib/supabase/types'
 
 interface TopbarProps {
-  isAdmin: boolean
   userId: string
 }
 
-export async function Topbar({ isAdmin, userId }: TopbarProps) {
-  if (!isAdmin) return null
-
+export async function Topbar({ userId }: TopbarProps) {
+  // Bell is visible to everyone — RLS scopes notifications to recipient_id.
+  // Admins see incoming brand_request + booking events; hosts see only the
+  // results of their own brand requests (approved/denied).
   const supabase = await createClient()
   const { data } = await supabase
     .from('notifications')

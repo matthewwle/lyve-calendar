@@ -1,7 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, X, CalendarPlus, CalendarX2 } from 'lucide-react'
+import {
+  Bell,
+  X,
+  CalendarPlus,
+  CalendarX2,
+  UserPlus,
+  CheckCircle2,
+  XCircle,
+  Check,
+} from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
   DropdownMenu,
@@ -10,6 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { createClient } from '@/lib/supabase/client'
 import { formatPT, cn } from '@/lib/utils'
+import { useToast } from '@/hooks/use-toast'
 import type { Notification } from '@/lib/supabase/types'
 
 interface NotificationBellProps {
@@ -20,6 +30,7 @@ interface NotificationBellProps {
 export function NotificationBell({ userId, initial }: NotificationBellProps) {
   const [items, setItems] = useState<Notification[]>(initial)
   const [open, setOpen] = useState(false)
+  const { toast } = useToast()
 
   // Realtime subscription: prepend INSERTs, drop DELETEs from other tabs.
   useEffect(() => {
@@ -92,6 +103,37 @@ export function NotificationBell({ userId, initial }: NotificationBellProps) {
     await supabase.from('notifications').delete().eq('recipient_id', userId)
   }
 
+  async function decide(n: Notification, approve: boolean) {
+    if (!n.request_id) return
+    // Optimistically remove this row from the local list. The RPC will also
+    // delete every brand_request notification that points at the same
+    // request_id, so the realtime DELETE event mirrors this for other tabs.
+    setItems(prev => prev.filter(i => i.id !== n.id))
+    const supabase = createClient()
+    const { error } = await supabase.rpc('decide_brand_request', {
+      p_request_id: n.request_id,
+      p_approve: approve,
+    })
+    if (error) {
+      toast({
+        title: approve ? 'Could not approve' : 'Could not deny',
+        description: error.message,
+        variant: 'destructive',
+      })
+      // Best-effort recovery: refetch so the row reappears if it actually
+      // wasn't decided. The page will see fresh state via Topbar's server fetch.
+      const { data } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('recipient_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      setItems((data as Notification[] | null) ?? [])
+    } else {
+      toast({ title: approve ? 'Request approved' : 'Request denied' })
+    }
+  }
+
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
@@ -111,7 +153,7 @@ export function NotificationBell({ userId, initial }: NotificationBellProps) {
       <DropdownMenuContent
         align="end"
         sideOffset={8}
-        className="w-[380px] p-0 max-h-[480px] overflow-hidden flex flex-col"
+        className="w-[400px] p-0 max-h-[520px] overflow-hidden flex flex-col"
       >
         <div className="flex items-center justify-between px-3 py-2 border-b border-border">
           <p className="text-sm font-semibold text-foreground">Notifications</p>
@@ -134,7 +176,12 @@ export function NotificationBell({ userId, initial }: NotificationBellProps) {
         ) : (
           <ul className="flex-1 overflow-auto divide-y divide-border">
             {items.map(n => (
-              <NotificationRow key={n.id} n={n} onDismiss={() => dismiss(n.id)} />
+              <NotificationRow
+                key={n.id}
+                n={n}
+                onDismiss={() => dismiss(n.id)}
+                onDecide={approve => decide(n, approve)}
+              />
             ))}
           </ul>
         )}
@@ -143,38 +190,60 @@ export function NotificationBell({ userId, initial }: NotificationBellProps) {
   )
 }
 
-function NotificationRow({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
-  const isBooked = n.type === 'shift_booked'
-  const Icon = isBooked ? CalendarPlus : CalendarX2
-
-  // PT-naive timestamps: same field-as-wall-clock scheme as the rest of the app
-  const dateLabel = formatPT(n.shift_start, 'EEE, MMM d')
-  const startLabel = formatPT(n.shift_start, 'h:mm a')
-  const endLabel = formatPT(n.shift_end, 'h:mm a')
+function NotificationRow({
+  n,
+  onDismiss,
+  onDecide,
+}: {
+  n: Notification
+  onDismiss: () => void
+  onDecide: (approve: boolean) => void
+}) {
   const relative = formatDistanceToNowStrict(new Date(n.created_at), { addSuffix: true })
 
+  // Resolve type-specific shape: icon, tint, message body, and any actions.
+  const meta = renderMeta(n)
+
   return (
-    <li className={cn('relative px-3 py-3 group hover:bg-secondary/50 transition-colors', !n.is_read && 'bg-primary/5')}>
+    <li
+      className={cn(
+        'relative px-3 py-3 group hover:bg-secondary/50 transition-colors',
+        !n.is_read && 'bg-primary/5',
+      )}
+    >
       <div className="flex gap-3 pr-6">
         <div
           className={cn(
             'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-            isBooked ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+            meta.iconBg,
           )}
         >
-          <Icon className="w-4 h-4" />
+          <meta.Icon className="w-4 h-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm text-foreground leading-snug">
-            <span className="font-semibold">{n.host_name}</span>{' '}
-            <span className="text-muted-foreground">{isBooked ? 'booked' : 'cancelled'}</span>{' '}
-            <span className="font-semibold">{n.brand_name}</span>{' '}
-            <span className="text-muted-foreground">for</span>{' '}
-            <span className="text-muted-foreground">
-              {dateLabel} · {startLabel} – {endLabel}
-            </span>
-          </p>
+          <p className="text-sm text-foreground leading-snug">{meta.body}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">{relative}</p>
+
+          {n.type === 'brand_request' && (
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => onDecide(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:brightness-95 transition-all"
+              >
+                <Check className="w-3 h-3" />
+                Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => onDecide(false)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-secondary text-foreground text-xs font-medium hover:bg-secondary/70 transition-colors"
+              >
+                <X className="w-3 h-3" />
+                Deny
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <button
@@ -187,4 +256,76 @@ function NotificationRow({ n, onDismiss }: { n: Notification; onDismiss: () => v
       </button>
     </li>
   )
+}
+
+function renderMeta(n: Notification): {
+  Icon: typeof Bell
+  iconBg: string
+  body: React.ReactNode
+} {
+  switch (n.type) {
+    case 'shift_booked':
+    case 'shift_cancelled': {
+      const isBooked = n.type === 'shift_booked'
+      const dateLabel = n.shift_start ? formatPT(n.shift_start, 'EEE, MMM d') : ''
+      const startLabel = n.shift_start ? formatPT(n.shift_start, 'h:mm a') : ''
+      const endLabel = n.shift_end ? formatPT(n.shift_end, 'h:mm a') : ''
+      return {
+        Icon: isBooked ? CalendarPlus : CalendarX2,
+        iconBg: isBooked ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+        body: (
+          <>
+            <span className="font-semibold">{n.host_name}</span>{' '}
+            <span className="text-muted-foreground">{isBooked ? 'booked' : 'cancelled'}</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>{' '}
+            <span className="text-muted-foreground">for</span>{' '}
+            <span className="text-muted-foreground">
+              {dateLabel} · {startLabel} – {endLabel}
+            </span>
+          </>
+        ),
+      }
+    }
+    case 'brand_request':
+      return {
+        Icon: UserPlus,
+        iconBg: 'bg-primary/15 text-primary',
+        body: (
+          <>
+            <span className="font-semibold">{n.host_name}</span>{' '}
+            <span className="text-muted-foreground">wants to host</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>
+          </>
+        ),
+      }
+    case 'brand_request_approved':
+      return {
+        Icon: CheckCircle2,
+        iconBg: 'bg-primary/15 text-primary',
+        body: (
+          <>
+            <span className="text-muted-foreground">You&rsquo;re approved to host</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>
+          </>
+        ),
+      }
+    case 'brand_request_denied':
+      return {
+        Icon: XCircle,
+        iconBg: 'bg-muted text-muted-foreground',
+        body: (
+          <>
+            <span className="text-muted-foreground">Your request to host</span>{' '}
+            <span className="font-semibold">{n.brand_name}</span>{' '}
+            <span className="text-muted-foreground">was denied</span>
+          </>
+        ),
+      }
+    default: {
+      // Compile-time exhaustiveness check — adding a new notification type
+      // without updating this switch will fail typecheck here.
+      const _exhaustive: never = n.type
+      throw new Error(`Unhandled notification type: ${_exhaustive as string}`)
+    }
+  }
 }

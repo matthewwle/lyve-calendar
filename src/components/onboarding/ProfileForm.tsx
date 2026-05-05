@@ -175,7 +175,9 @@ export function ProfileForm({ userId, initial, headshotUrl, mode = 'onboarding' 
     if (updateErr) { setError(updateErr.message); return }
 
     if (mode === 'onboarding') {
-      router.push('/calendar')
+      // After profile completion, take new hosts to the brand request step.
+      // They can skip from there straight to /calendar.
+      router.push('/onboarding/brands')
       router.refresh()
     } else {
       toast({ title: 'Profile updated' })

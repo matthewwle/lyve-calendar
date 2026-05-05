@@ -72,9 +72,10 @@ export default async function DashboardLayout({
         viewingAsHost={viewingAsHost}
         hasHostProfile={hasHostProfile}
         headshotUrl={headshotUrl}
+        userId={user.id}
       />
       <main className="flex-1 flex flex-col overflow-hidden">
-        <Topbar isAdmin={effectiveIsAdmin} userId={user.id} />
+        <Topbar userId={user.id} />
         <div className="flex-1 overflow-auto">
           {children}
         </div>
