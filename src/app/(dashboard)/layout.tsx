@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/sidebar/Sidebar'
+import { Topbar } from '@/components/topbar/Topbar'
 import { resolveRole } from '@/lib/role'
 import { isProfileComplete } from '@/lib/profile'
 import type { Brand, Profile } from '@/lib/supabase/types'
@@ -72,8 +73,11 @@ export default async function DashboardLayout({
         hasHostProfile={hasHostProfile}
         headshotUrl={headshotUrl}
       />
-      <main className="flex-1 overflow-auto">
-        {children}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <Topbar isAdmin={effectiveIsAdmin} userId={user.id} />
+        <div className="flex-1 overflow-auto">
+          {children}
+        </div>
       </main>
     </div>
   )

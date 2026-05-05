@@ -14,11 +14,11 @@ export default async function CalendarLandingPage() {
 
   const [{ data: profileData }, { data: brandsData }] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
-    supabase.from('brands').select('id, name').order('name'),
+    supabase.from('brands').select('*').order('name'),
   ])
 
   const profile = profileData as Profile | null
-  const allBrands = (brandsData as Pick<Brand, 'id' | 'name'>[] | null) ?? []
+  const allBrands = (brandsData as Brand[] | null) ?? []
   const { effectiveIsAdmin } = await resolveRole(profile)
 
   // Filter brand list by host eligibility for non-admins

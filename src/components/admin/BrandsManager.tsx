@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { BrandLogo } from '@/components/brand/BrandLogo'
+import { BrandLogoUploader } from './BrandLogoUploader'
 import {
   Dialog,
   DialogContent,
@@ -148,6 +150,7 @@ export function BrandsManager({ initialBrands, profiles }: BrandsManagerProps) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
+                <th className="text-left px-4 py-3 text-muted-foreground font-medium w-12"></th>
                 <th className="text-left px-4 py-3 text-muted-foreground font-medium">Name</th>
                 <th className="text-left px-4 py-3 text-muted-foreground font-medium">Email</th>
                 <th className="text-left px-4 py-3 text-muted-foreground font-medium">Linked User</th>
@@ -159,6 +162,9 @@ export function BrandsManager({ initialBrands, profiles }: BrandsManagerProps) {
                 const linkedProfile = brand.user_id ? profileMap.get(brand.user_id) : null
                 return (
                   <tr key={brand.id} className={`border-b border-border last:border-0 ${i % 2 === 0 ? '' : 'bg-secondary/20'}`}>
+                    <td className="px-4 py-3">
+                      <BrandLogo name={brand.name} logoPath={brand.logo_path} size="md" />
+                    </td>
                     <td className="px-4 py-3 font-medium text-foreground">{brand.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{brand.email || '—'}</td>
                     <td className="px-4 py-3">
@@ -239,6 +245,34 @@ export function BrandsManager({ initialBrands, profiles }: BrandsManagerProps) {
               </Select>
               <p className="text-[11px] text-muted-foreground">Linked users can log in and view their assigned streams.</p>
             </div>
+            {editingBrand ? (
+              <div className="pt-2 border-t border-border">
+                <BrandLogoUploader
+                  brandId={editingBrand.id}
+                  brandName={editingBrand.name}
+                  currentPath={editingBrand.logo_path}
+                  onChange={async newPath => {
+                    const { data, error: updErr } = await supabase
+                      .from('brands')
+                      .update({ logo_path: newPath })
+                      .eq('id', editingBrand.id)
+                      .select()
+                      .single()
+                    if (updErr) {
+                      toast({ title: 'Error', description: updErr.message, variant: 'destructive' })
+                      return
+                    }
+                    setEditingBrand(data as Brand)
+                    setBrands(prev => prev.map(b => b.id === editingBrand.id ? (data as Brand) : b))
+                    toast({ title: newPath ? 'Logo updated' : 'Logo removed' })
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground italic">
+                Add a logo after creating the brand by clicking Edit on its row.
+              </p>
+            )}
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
           <DialogFooter>

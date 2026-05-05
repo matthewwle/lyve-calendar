@@ -4,10 +4,11 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { Users, Building2, Mic, Shield, LogOut, Plus, CalendarDays, Eye, ShieldCheck, ClipboardList, Settings } from 'lucide-react'
+import { Users, Building2, Mic, Shield, LogOut, Plus, Eye, ShieldCheck, ClipboardList, Settings, LayoutDashboard } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -23,6 +24,7 @@ interface SidebarProps {
 }
 
 const adminLinks = [
+  { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/hosts', label: 'Hosts', icon: Users },
   { href: '/admin/brands', label: 'Brands', icon: Building2 },
   { href: '/admin/producers', label: 'Producers', icon: Mic },
@@ -93,7 +95,7 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
                     : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
                 )}
               >
-                <CalendarDays className="w-4 h-4 flex-shrink-0" />
+                <BrandLogo name={brand.name} logoPath={brand.logo_path} size="xs" fallbackIcon />
                 <span className="truncate">{brand.name}</span>
               </Link>
             )

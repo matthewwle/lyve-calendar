@@ -82,6 +82,7 @@ export interface Database {
           block_size_minutes: number
           day_start_minutes: number
           day_end_minutes: number
+          logo_path: string | null
           created_at: string
         }
         Insert: {
@@ -92,6 +93,7 @@ export interface Database {
           block_size_minutes?: number
           day_start_minutes?: number
           day_end_minutes?: number
+          logo_path?: string | null
           created_at?: string
         }
         Update: {
@@ -101,6 +103,7 @@ export interface Database {
           block_size_minutes?: number
           day_start_minutes?: number
           day_end_minutes?: number
+          logo_path?: string | null
         }
       }
       producers: {
@@ -176,6 +179,37 @@ export interface Database {
           is_blocked?: boolean
         }
       }
+      notifications: {
+        Row: {
+          id: string
+          recipient_id: string
+          type: 'shift_booked' | 'shift_cancelled'
+          actor_host_id: string | null
+          host_name: string
+          brand_id: string | null
+          brand_name: string
+          shift_start: string
+          shift_end: string
+          is_read: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          recipient_id: string
+          type: 'shift_booked' | 'shift_cancelled'
+          actor_host_id?: string | null
+          host_name: string
+          brand_id?: string | null
+          brand_name: string
+          shift_start: string
+          shift_end: string
+          is_read?: boolean
+          created_at?: string
+        }
+        Update: {
+          is_read?: boolean
+        }
+      }
       streams: {
         Row: {
           id: string
@@ -229,6 +263,7 @@ export type Stream         = Database['public']['Tables']['streams']['Row']
 export type BrandShiftRate     = Database['public']['Tables']['brand_shift_rates']['Row']
 export type BrandShiftOverride = Database['public']['Tables']['brand_shift_overrides']['Row']
 export type BrandHost          = Database['public']['Tables']['brand_hosts']['Row']
+export type Notification       = Database['public']['Tables']['notifications']['Row']
 
 export interface StreamWithRelations extends Stream {
   host:     { id: string; name: string } | null

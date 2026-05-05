@@ -468,9 +468,17 @@ export function CalendarView({
               )}
               {!hideRate && (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className={`text-xl font-bold tracking-tight ${isPast ? 'text-primary/60' : 'text-primary'}`}>
-                    {formatCents(cents)}/hr
-                  </span>
+                  {isPast ? (
+                    // Past: faint orange text only — subtle, washed out
+                    <span className="text-xl font-bold tracking-tight text-primary/45">
+                      {formatCents(cents)}/hr
+                    </span>
+                  ) : (
+                    // Upcoming: solid orange pill with white text — pops like a button
+                    <span className="px-3 py-1 rounded-full bg-primary text-primary-foreground text-base font-bold tracking-tight shadow-sm">
+                      {formatCents(cents)}/hr
+                    </span>
+                  )}
                 </div>
               )}
             </>
@@ -776,22 +784,9 @@ export function CalendarView({
           now={() => {
             // FC is set to timeZone="UTC", but our stored times are
             // PT-wall-clock encoded as UTC. The now-indicator must follow
-            // the same convention: produce the *actual* PT wall-clock as
-            // UTC fields so it lines up with the slot grid.
-            const real = new Date()
-            const ptNow = new Intl.DateTimeFormat('en-US', {
-              timeZone: 'America/Los_Angeles',
-              year: 'numeric', month: '2-digit', day: '2-digit',
-              hour: '2-digit', minute: '2-digit', second: '2-digit',
-              hour12: false,
-            }).formatToParts(real)
-            const part = (t: string) => Number(ptNow.find(p => p.type === t)!.value)
-            return new Date(Date.UTC(
-              part('year'), part('month') - 1, part('day'),
-              // formatToParts gives 24h "00"–"23" for hour
-              part('hour') === 24 ? 0 : part('hour'),
-              part('minute'), part('second')
-            ))
+            // the same convention so it lines up with the slot grid —
+            // exactly what nowPtAsUtc() already produces.
+            return nowPtAsUtc()
           }}
           slotDuration={minutesToTimeString(shift.blockSizeMinutes)}
           slotLabelInterval={minutesToTimeString(shift.blockSizeMinutes)}

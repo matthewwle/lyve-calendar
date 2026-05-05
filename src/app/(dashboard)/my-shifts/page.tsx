@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation'
 import { ClipboardList } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { MyShiftsList, type ShiftRow } from '@/components/my-shifts/MyShiftsList'
-import { buildRateLookup, DEFAULT_RATE_CENTS, utcToPt, formatPT, nowPtAsUtc } from '@/lib/utils'
+import { nowPtAsUtc } from '@/lib/utils'
+import { buildPayoutContextByBrand, computeShiftPayoutCents } from '@/lib/payout'
 import type { Brand, BrandShiftRate, BrandShiftOverride } from '@/lib/supabase/types'
 
 export default async function MyShiftsPage() {
@@ -77,42 +78,20 @@ export default async function MyShiftsPage() {
         { data: [] as BrandShiftOverride[] },
       ]
 
-  // Map brand_id → rates lookup (per-(weekday, block) defaults)
-  const ratesByBrand = new Map<string, ReturnType<typeof buildRateLookup>>()
-  for (const brandId of brandIds) {
-    const rows = (ratesData as BrandShiftRate[]).filter(r => r.brand_id === brandId)
-    ratesByBrand.set(brandId, buildRateLookup(rows))
-  }
+  // Build per-brand payout context (rates + overrides) once
+  const ctxByBrand = buildPayoutContextByBrand(
+    brandIds,
+    (ratesData as BrandShiftRate[] | null) ?? [],
+    (overridesData as BrandShiftOverride[] | null) ?? [],
+  )
 
-  // Map brand_id → override lookup keyed by "yyyy-mm-dd-blockIdx"
-  const overridesByBrand = new Map<string, Map<string, number>>()
-  for (const o of (overridesData as BrandShiftOverride[] | null) ?? []) {
-    if (!overridesByBrand.has(o.brand_id)) overridesByBrand.set(o.brand_id, new Map())
-    overridesByBrand.get(o.brand_id)!.set(`${o.shift_date}-${o.block_index}`, o.rate_cents)
-  }
-
-  // Compute the actual per-shift price using overrides first, falling back to
-  // the per-(weekday, block) default. Mirrors the calendar's effective-rate
-  // logic so totals match what the user sees on each cell.
+  // Compute per-shift payout via the shared helper so totals match what hosts
+  // see in the calendar and admins see in the monthly Dashboard.
   const now = nowPtAsUtc().getTime()
   const shifts: ShiftRow[] = streams.map(s => {
     const brand = s.brand as Pick<Brand, 'id' | 'name' | 'block_size_minutes' | 'day_start_minutes'>
-    const startDate = new Date(s.start_time)
-    const endDate = new Date(s.end_time)
-    // PT-derived day, hour and minute so the lookup matches the same
-    // (weekday, block) the admin saw when they set the rate.
-    const ptStart = utcToPt(startDate)
-    const slotMins = ptStart.getHours() * 60 + ptStart.getMinutes()
-    const blockIdx = Math.round((slotMins - brand.day_start_minutes) / brand.block_size_minutes)
-    const dow = ptStart.getDay()
-
-    const dateKey = formatPT(startDate, 'yyyy-MM-dd')
-    const overrideRate = overridesByBrand.get(brand.id)?.get(`${dateKey}-${blockIdx}`)
-    const lookup = ratesByBrand.get(brand.id)
-    const rateCents = overrideRate ?? (lookup ? lookup.get(dow, blockIdx) : DEFAULT_RATE_CENTS)
-
-    const durationMinutes = (endDate.getTime() - startDate.getTime()) / 60_000
-    const totalCents = Math.round((rateCents * durationMinutes) / 60)
+    const ctx = ctxByBrand.get(brand.id)!
+    const { rateCents, totalCents } = computeShiftPayoutCents(s.start_time, s.end_time, brand, ctx)
     return {
       id: s.id,
       brandId: brand.id,
@@ -122,7 +101,7 @@ export default async function MyShiftsPage() {
       endISO: s.end_time,
       rateCents,
       totalCents,
-      isPast: endDate.getTime() <= now,
+      isPast: new Date(s.end_time).getTime() <= now,
       notes: s.notes,
     }
   })

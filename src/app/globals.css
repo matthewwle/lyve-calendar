@@ -4,24 +4,24 @@
 
 @layer base {
   :root {
-    --background: 0 0% 4%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 7%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 7%;
-    --popover-foreground: 0 0% 98%;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
     --primary: 5 100% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 12%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 12%;
-    --muted-foreground: 0 0% 55%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
     --accent: 5 100% 60%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 15%;
-    --input: 0 0% 12%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 96%;
     --ring: 5 100% 60%;
     --radius: 0.5rem;
   }
@@ -37,38 +37,38 @@
   }
 }
 
-/* FullCalendar dark theme overrides */
+/* FullCalendar light-theme overrides */
 .fc {
-  --fc-border-color: hsl(0 0% 15%);
-  --fc-button-bg-color: hsl(0 0% 12%);
-  --fc-button-border-color: hsl(0 0% 20%);
+  --fc-border-color: hsl(0 0% 90%);
+  --fc-button-bg-color: hsl(0 0% 96%);
+  --fc-button-border-color: hsl(0 0% 88%);
   --fc-button-hover-bg-color: hsl(5 100% 60%);
   --fc-button-hover-border-color: hsl(5 100% 50%);
   --fc-button-active-bg-color: hsl(5 100% 55%);
   --fc-button-active-border-color: hsl(5 100% 45%);
-  --fc-button-text-color: hsl(0 0% 98%);
-  --fc-today-bg-color: hsl(5 100% 60% / 0.1);
-  --fc-page-bg-color: hsl(0 0% 4%);
-  --fc-neutral-bg-color: hsl(0 0% 7%);
-  --fc-neutral-text-color: hsl(0 0% 98%);
-  --fc-list-event-hover-bg-color: hsl(0 0% 12%);
+  --fc-button-text-color: hsl(0 0% 9%);
+  --fc-today-bg-color: hsl(5 100% 60% / 0.08);
+  --fc-page-bg-color: hsl(0 0% 98%);
+  --fc-neutral-bg-color: hsl(0 0% 100%);
+  --fc-neutral-text-color: hsl(0 0% 9%);
+  --fc-list-event-hover-bg-color: hsl(0 0% 96%);
   --fc-highlight-color: hsl(5 100% 60% / 0.15);
 }
 
 .fc .fc-col-header-cell-cushion,
 .fc .fc-daygrid-day-number,
 .fc .fc-list-day-cushion {
-  color: hsl(0 0% 75%);
+  color: hsl(0 0% 35%);
   text-decoration: none;
 }
 
 .fc .fc-daygrid-day-number:hover,
 .fc .fc-col-header-cell-cushion:hover {
-  color: hsl(0 0% 98%);
+  color: hsl(0 0% 9%);
 }
 
 .fc .fc-toolbar-title {
-  color: hsl(0 0% 98%);
+  color: hsl(0 0% 9%);
   font-size: 1.1rem;
   font-weight: 600;
 }
@@ -89,6 +89,7 @@
 .fc .fc-button-primary:not(:disabled):active {
   background-color: hsl(5 100% 55%);
   border-color: hsl(5 100% 45%);
+  color: #ffffff;
 }
 
 .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
@@ -111,8 +112,9 @@
   transition: filter 0.1s;
 }
 
+/* Hovered events darken slightly so they pop on white */
 .fc .fc-event:not(.fc-bg-event):not(.past-stream):hover {
-  filter: brightness(1.15);
+  filter: brightness(0.95);
 }
 
 /* Booked-shift events fill the full cell width — eliminate the right gutter
@@ -139,29 +141,29 @@
 }
 
 .fc .fc-list-event td {
-  border-color: hsl(0 0% 15%);
+  border-color: hsl(0 0% 90%);
 }
 
 .fc .fc-scrollgrid {
-  border-color: hsl(0 0% 15%);
+  border-color: hsl(0 0% 90%);
 }
 
 .fc .fc-scrollgrid-section > * {
-  border-color: hsl(0 0% 15%);
+  border-color: hsl(0 0% 90%);
 }
 
 .fc td, .fc th {
-  border-color: hsl(0 0% 15%);
+  border-color: hsl(0 0% 90%);
 }
 
 .fc .fc-more-popover {
-  background: hsl(0 0% 10%);
-  border-color: hsl(0 0% 20%);
+  background: hsl(0 0% 100%);
+  border-color: hsl(0 0% 88%);
 }
 
 .fc .fc-more-popover .fc-popover-header {
-  background: hsl(0 0% 12%);
-  color: hsl(0 0% 98%);
+  background: hsl(0 0% 96%);
+  color: hsl(0 0% 9%);
 }
 
 .fc .fc-daygrid-more-link {
@@ -169,38 +171,41 @@
 }
 
 .fc .fc-list-day-cushion {
-  background-color: hsl(0 0% 9%);
+  background-color: hsl(0 0% 96%);
 }
 
 .fc-theme-standard .fc-list-day-cushion {
-  background-color: hsl(0 0% 9%);
+  background-color: hsl(0 0% 96%);
 }
 
 /* Background events stay non-interactive (FC doesn't fire eventClick on
-   them anyway). Clicks pass through to the underlying cell's dateClick. */
+   them anyway). Clicks pass through to the underlying cell's dateClick.
+   Force full opacity — FC defaults bg events to ~0.3, which would fade
+   the orange rate-pill we render inside them. */
 .fc .fc-bg-event {
   transition: background-color 80ms ease-out;
+  opacity: 1 !important;
 }
 
-/* Bookable shift cells: true black */
+/* Bookable shift cells: pure white */
 .fc .fc-timegrid-col,
 .fc .fc-timegrid-col-frame {
-  background-color: #000000;
+  background-color: #ffffff;
 }
 
 /* Time-grid: today's column gets no tint (the orange "now" line marks it).
    Month view keeps FC's default highlight since there's no now-line there. */
 .fc .fc-timegrid-col.fc-day-today {
-  background-color: #000000 !important;
+  background-color: #ffffff !important;
 }
 
 /* Month view: past days are dimmed for visual hierarchy. Today is left with
    FC's default tint since there's no now-line marker in this view. */
 .fc .fc-daygrid-day.past-day {
-  background-color: #141414;
+  background-color: #f1f1f1;
 }
 .fc .fc-daygrid-day.past-day .fc-daygrid-day-events .fc-event {
-  opacity: 0.55;
+  opacity: 0.7;
 }
 
 /* Month-view event pills: tight orange pill, no harness inset weirdness */
@@ -218,29 +223,25 @@
 /* Hide the default time prefix in month pills — title already says everything */
 .fc-daygrid-event .fc-event-time { display: none; }
 
-/* Past shifts: stand out as clearly inactive history.
-   .past-cell sits as a background event over the slot, so we colour it
-   directly instead of relying on opacity. */
-/* Past cells: diagonal stripe texture on a pure-black background reads as
-   "history" without depending on a brightness shift the eye barely catches. */
+/* Past cells: faint diagonal stripe pattern reads as "history" without a
+   heavy color shift — works against the white grid. */
 .fc .fc-bg-event.past-cell {
   background-color: transparent !important;
   background-image: repeating-linear-gradient(
     45deg,
     transparent 0,
     transparent 8px,
-    rgba(255, 255, 255, 0.04) 8px,
-    rgba(255, 255, 255, 0.04) 14px
+    rgba(0, 0, 0, 0.04) 8px,
+    rgba(0, 0, 0, 0.04) 14px
   ) !important;
-  border-bottom: 1px solid hsl(0 0% 22%) !important;
+  border-bottom: 1px solid hsl(0 0% 82%) !important;
   opacity: 1 !important;
 }
 
-/* Past booked shifts: desaturated solid (same color family as the live orange,
-   washed out) reads as "completed" instead of "broken". */
+/* Past booked shifts: lighter desaturated peach reads as "completed" on white. */
 .past-stream {
-  background-color: #7a3d36 !important;
-  border-color: #5e2e29 !important;
+  background-color: #F5B3A8 !important;
+  border-color: #E89E91 !important;
   opacity: 1;
 }
 
@@ -249,11 +250,11 @@
   cursor: not-allowed;
 }
 
-/* Chain-locked cells: dimmed solid grey + lock icon. Distinct from past
+/* Chain-locked cells: light grey solid + lock icon. Distinct from past
    (stripes + clock) and blocked (red X). Will open up once an adjacent
    shift is booked. */
 .fc .fc-bg-event.chain-locked-cell {
-  background-color: #1a1a1a !important;
+  background-color: #e5e5e5 !important;
   cursor: not-allowed;
 }
 

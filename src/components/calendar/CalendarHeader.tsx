@@ -6,6 +6,7 @@ import type { Brand, BrandShiftRate } from '@/lib/supabase/types'
 import { Button } from '@/components/ui/button'
 import { ShiftSettingsDialog } from './ShiftSettingsDialog'
 import { minutesToLabel, formatCents, DEFAULT_RATE_CENTS } from '@/lib/utils'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 
 interface CalendarHeaderProps {
   brand: Brand
@@ -28,7 +29,9 @@ export function CalendarHeader({ brand, shiftRates, canEdit }: CalendarHeaderPro
   return (
     <>
       <div className="px-6 pt-5 pb-3 flex items-center justify-between gap-3 border-b border-border">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex items-center gap-3">
+          <BrandLogo name={brand.name} logoPath={brand.logo_path} size="lg" />
+          <div className="min-w-0">
           <h1 className="text-lg font-bold text-foreground truncate">{brand.name}</h1>
           <div className="flex items-center gap-3 mt-1 text-xs">
             <span className="text-muted-foreground">
@@ -41,6 +44,7 @@ export function CalendarHeader({ brand, shiftRates, canEdit }: CalendarHeaderPro
                 ? `${formatCents(minRate)}/hr (all shifts)`
                 : `${formatCents(minRate)} – ${formatCents(maxRate)}/hr`}
             </span>
+          </div>
           </div>
         </div>
         {canEdit && (
