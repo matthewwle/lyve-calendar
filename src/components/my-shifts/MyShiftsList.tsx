@@ -88,7 +88,10 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
   const monthProjectedCents = upcoming
     .filter(s => {
       const t = new Date(s.startISO).getTime()
-      return t >= now && t <= monthEnd
+      // monthEnd is the EXCLUSIVE start of next month (midnight on day 1).
+      // Use < so a shift that starts exactly at next-month-midnight rolls
+      // into next month's stats, not this month's.
+      return t >= now && t < monthEnd
     })
     .reduce((sum, s) => sum + s.totalCents, 0)
   // All-time totals — every past shift the host has worked
@@ -140,7 +143,7 @@ export function MyShiftsList({ hostName, shifts }: MyShiftsListProps) {
           value={formatCents(monthProjectedCents)}
           sub={`${upcoming.filter(s => {
             const t = new Date(s.startISO).getTime()
-            return t >= now && t <= monthEnd
+            return t >= now && t < monthEnd
           }).length} upcoming shifts`}
         />
       </div>
