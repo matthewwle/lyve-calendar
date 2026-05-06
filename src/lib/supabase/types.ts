@@ -127,6 +127,27 @@ export interface Database {
           user_id?: string | null
         }
       }
+      moderators: {
+        Row: {
+          id: string
+          name: string
+          email: string | null
+          user_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          email?: string | null
+          user_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          name?: string
+          email?: string | null
+          user_id?: string | null
+        }
+      }
       brand_hosts: {
         Row: {
           brand_id: string
@@ -289,6 +310,7 @@ export interface Database {
           brand_id: string
           host_id: string | null
           producer_id: string | null
+          moderator_id: string | null
           start_time: string
           end_time: string
           notes: string | null
@@ -301,6 +323,7 @@ export interface Database {
           brand_id: string
           host_id?: string | null
           producer_id?: string | null
+          moderator_id?: string | null
           start_time: string
           end_time: string
           notes?: string | null
@@ -312,6 +335,7 @@ export interface Database {
           brand_id?: string
           host_id?: string | null
           producer_id?: string | null
+          moderator_id?: string | null
           start_time?: string
           end_time?: string
           notes?: string | null
@@ -331,6 +355,7 @@ export type Profile        = Database['public']['Tables']['profiles']['Row']
 export type Host           = Database['public']['Tables']['hosts']['Row']
 export type Brand          = Database['public']['Tables']['brands']['Row']
 export type Producer       = Database['public']['Tables']['producers']['Row']
+export type Moderator      = Database['public']['Tables']['moderators']['Row']
 export type Stream         = Database['public']['Tables']['streams']['Row']
 export type BrandShiftRate     = Database['public']['Tables']['brand_shift_rates']['Row']
 export type BrandShiftOverride = Database['public']['Tables']['brand_shift_overrides']['Row']
@@ -340,7 +365,8 @@ export type BrandHostRequest   = Database['public']['Tables']['brand_host_reques
 export type ShiftCancellationRequest = Database['public']['Tables']['shift_cancellation_requests']['Row']
 
 export interface StreamWithRelations extends Stream {
-  host:     { id: string; name: string } | null
-  brand:    { id: string; name: string }
-  producer: { id: string; name: string } | null
+  host:      { id: string; name: string } | null
+  brand:     { id: string; name: string }
+  producer:  { id: string; name: string } | null
+  moderator: { id: string; name: string } | null
 }

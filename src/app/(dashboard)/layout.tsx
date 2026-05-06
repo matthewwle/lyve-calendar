@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { Topbar } from '@/components/topbar/Topbar'
-import { resolveRole } from '@/lib/role'
+import { resolveRole, resolveUserRoles } from '@/lib/role'
 import { isProfileComplete } from '@/lib/profile'
 import type { Brand, Profile } from '@/lib/supabase/types'
 
@@ -32,26 +32,25 @@ export default async function DashboardLayout({
   const { actualIsAdmin, viewingAsHost } = await resolveRole(profile)
   const effectiveIsAdmin = actualIsAdmin && !viewingAsHost
 
-  // Always fetch the user's host record (admins can be hosts too) — drives both
-  // brand filtering for non-admins AND the "My Shifts" sidebar link visibility.
-  const { data: myHost } = await supabase
-    .from('hosts')
-    .select('id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  const hasHostProfile = !!myHost
+  // Resolve all role memberships (host / producer / moderator) in one shot.
+  const userRoles = await resolveUserRoles(supabase, user.id, effectiveIsAdmin)
+  const hasHostProfile = userRoles.isHost
+  const hasBackstageRole = userRoles.isProducer || userRoles.isModerator
 
-  // Non-admins (and admins viewing as host) only see brands their linked host
-  // has access to. If they aren't linked to a host, they see nothing.
+  // Brand visibility:
+  //   admin                → every brand
+  //   producer/moderator   → every brand (read-only across the app)
+  //   host only            → brands their hosts row is linked to via brand_hosts
+  //   none                 → empty
   let brands = allBrands
-  if (!effectiveIsAdmin) {
-    if (!myHost) {
+  if (!effectiveIsAdmin && !hasBackstageRole) {
+    if (!userRoles.hostId) {
       brands = []
     } else {
       const { data: myBrandLinks } = await supabase
         .from('brand_hosts')
         .select('brand_id')
-        .eq('host_id', myHost.id)
+        .eq('host_id', userRoles.hostId)
       const allowed = new Set((myBrandLinks ?? []).map(r => r.brand_id))
       brands = allBrands.filter(b => allowed.has(b.id))
     }
@@ -71,6 +70,8 @@ export default async function DashboardLayout({
         actualIsAdmin={actualIsAdmin}
         viewingAsHost={viewingAsHost}
         hasHostProfile={hasHostProfile}
+        isProducer={userRoles.isProducer}
+        isModerator={userRoles.isModerator}
         headshotUrl={headshotUrl}
         userId={user.id}
       />

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2, DollarSign, Hand, X as XIcon, CalendarRange, UserCircle2, AlarmClock } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import type { Host, Producer, StreamWithRelations } from '@/lib/supabase/types'
+import type { Host, Moderator, Producer, StreamWithRelations } from '@/lib/supabase/types'
 import { HostProfileDialog } from '@/components/profile/HostProfileDialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -52,7 +52,11 @@ interface StreamEventModalProps {
   existingStream: StreamWithRelations | null
   hosts: Host[]
   producers: Producer[]
+  moderators: Moderator[]
   isAdmin: boolean
+  /** False when the user is a producer/moderator on a brand they don't host —
+   *  the dialog renders read-only details, no book/cancel/save controls. */
+  canBook: boolean
   currentUserId: string
   currentHost: { id: string; name: string } | null
   /** True if the current user already has a pending cancellation request
@@ -70,7 +74,9 @@ export function StreamEventModal({
   existingStream,
   hosts,
   producers,
+  moderators,
   isAdmin,
+  canBook,
   currentUserId,
   currentHost,
   hasPendingCancel = false,
@@ -80,6 +86,7 @@ export function StreamEventModal({
   const [profileOpen, setProfileOpen] = useState(false)
   const [hostId, setHostId] = useState<string>('')
   const [producerId, setProducerId] = useState<string>('')
+  const [moderatorId, setModeratorId] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -90,6 +97,7 @@ export function StreamEventModal({
     if (!isOpen) return
     setHostId(existingStream?.host_id ?? '')
     setProducerId(existingStream?.producer_id ?? '')
+    setModeratorId(existingStream?.moderator_id ?? '')
     setNotes(existingStream?.notes ?? '')
     setCancelReason('')
     setError(null)
@@ -113,15 +121,18 @@ export function StreamEventModal({
     const supabase = createClient()
 
     const payload = {
-      brand_id:    brandId,
-      host_id:     hostId || null,
-      producer_id: producerId || null,
-      notes:       notes.trim() || null,
-      start_time:  slot.start.toISOString(),
-      end_time:    slot.end.toISOString(),
-      created_by:  currentUserId,
-      title:       null,
+      brand_id:     brandId,
+      host_id:      hostId || null,
+      producer_id:  producerId || null,
+      moderator_id: moderatorId || null,
+      notes:        notes.trim() || null,
+      start_time:   slot.start.toISOString(),
+      end_time:     slot.end.toISOString(),
+      created_by:   currentUserId,
+      title:        null,
     }
+
+    const STREAM_SELECT = '*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name), moderator:moderators(id,name)'
 
     try {
       let result: StreamWithRelations
@@ -129,12 +140,13 @@ export function StreamEventModal({
         const { data, error } = await supabase
           .from('streams')
           .update({
-            host_id:     payload.host_id,
-            producer_id: payload.producer_id,
-            notes:       payload.notes,
+            host_id:      payload.host_id,
+            producer_id:  payload.producer_id,
+            moderator_id: payload.moderator_id,
+            notes:        payload.notes,
           })
           .eq('id', existingStream.id)
-          .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+          .select(STREAM_SELECT)
           .single()
         if (error) throw error
         result = data as StreamWithRelations
@@ -142,7 +154,7 @@ export function StreamEventModal({
         const { data, error } = await supabase
           .from('streams')
           .insert(payload)
-          .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+          .select(STREAM_SELECT)
           .single()
         if (error) throw error
         result = data as StreamWithRelations
@@ -317,7 +329,7 @@ export function StreamEventModal({
     if (bookedStartTimes.length > 0) {
       const { data: newStreams } = await supabase
         .from('streams')
-        .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+        .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name), moderator:moderators(id,name)')
         .eq('brand_id', brandId)
         .in('start_time', bookedStartTimes)
       for (const s of (newStreams ?? []) as StreamWithRelations[]) {
@@ -479,6 +491,34 @@ export function StreamEventModal({
               )}
             </div>
 
+            {/* Moderator */}
+            <div className="space-y-1.5">
+              <Label htmlFor="slot-moderator">Moderator</Label>
+              {isAdmin ? (
+                <Select
+                  value={moderatorId || NONE}
+                  onValueChange={v => setModeratorId(v === NONE ? '' : v)}
+                >
+                  <SelectTrigger id="slot-moderator">
+                    <SelectValue placeholder="Not filled yet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>Not filled yet</SelectItem>
+                    {moderators.map(m => (
+                      <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (() => {
+                const moderatorName = moderators.find(m => m.id === moderatorId)?.name
+                return (
+                  <p className={`text-sm ${moderatorName ? 'text-foreground' : 'text-muted-foreground italic'}`}>
+                    {moderatorName ?? 'Not filled yet'}
+                  </p>
+                )
+              })()}
+            </div>
+
             {/* Notes — admin can edit, hosts can read */}
             {isAdmin ? (
               <div className="space-y-1.5">
@@ -539,7 +579,7 @@ export function StreamEventModal({
               </span>
             )}
 
-            {!isAdmin && currentHost && !isPast && (() => {
+            {!isAdmin && canBook && currentHost && !isPast && (() => {
               const claimedByMe = existingStream?.host_id === currentHost.id
               const taken = !!existingStream?.host_id && !claimedByMe
               if (claimedByMe) {
@@ -600,10 +640,18 @@ export function StreamEventModal({
               )
             })()}
 
-            {/* Host without a linked profile */}
-            {!isAdmin && !currentHost && (
+            {/* Host without a linked profile (only shown to users who'd be
+                 able to book on this brand if they had a host profile) */}
+            {!isAdmin && canBook && !currentHost && (
               <span className="text-xs text-muted-foreground italic self-center">
                 Link your account to a host profile to book shifts.
+              </span>
+            )}
+
+            {/* Read-only viewer (producer or moderator on a brand they don't host) */}
+            {!isAdmin && !canBook && (
+              <span className="text-xs text-muted-foreground italic self-center">
+                View only — only admins can change this shift.
               </span>
             )}
           </DialogFooter>

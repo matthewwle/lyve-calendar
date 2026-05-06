@@ -17,7 +17,7 @@ import { MousePointerSquareDashed, X, Check, Ban, Unlock, DollarSign, Clock, Loc
 import { format } from 'date-fns'
 import { streamsToEvents } from '@/hooks/useStreams'
 import { StreamEventModal } from './StreamEventModal'
-import type { StreamWithRelations, Host, Producer, BrandShiftRate, BrandShiftOverride } from '@/lib/supabase/types'
+import type { StreamWithRelations, Host, Producer, Moderator, BrandShiftRate, BrandShiftOverride } from '@/lib/supabase/types'
 import { useToast } from '@/hooks/use-toast'
 import {
   minutesToTimeString,
@@ -52,10 +52,15 @@ interface CalendarViewProps {
   initialStreams: StreamWithRelations[]
   initialHosts: Host[]
   initialProducers: Producer[]
+  initialModerators: Moderator[]
   initialShiftRates: BrandShiftRate[]
   initialShiftOverrides: BrandShiftOverride[]
   shift: ShiftConfig
   isAdmin: boolean
+  /** When false, the calendar renders read-only — no booking, no rate-cell
+   *  click, no chain-lock indicator. Producers/moderators on a brand they
+   *  don't host see this mode. */
+  canBook: boolean
   currentUserId: string
   currentHost: { id: string; name: string } | null
   conflicts: ConflictBooking[]
@@ -75,10 +80,12 @@ export function CalendarView({
   initialStreams,
   initialHosts,
   initialProducers,
+  initialModerators,
   initialShiftRates,
   initialShiftOverrides,
   shift,
   isAdmin,
+  canBook,
   currentUserId,
   currentHost,
   conflicts,
@@ -775,8 +782,9 @@ export function CalendarView({
               out.push('rate-cell')
               if (props.isBlocked) out.push('blocked-cell')
               if (isPast) out.push('past-cell')
-              // Chain lock only applies to bookable future cells for non-admins
-              if (!isAdmin && !isPast && !props.isBlocked && start) {
+              // Chain lock only applies to bookable future cells for hosts.
+              // Producers/moderators viewing read-only don't need to see it.
+              if (!isAdmin && canBook && !isPast && !props.isBlocked && start) {
                 const ptStart = utcToPt(start)
                 const slotMins = ptStart.getHours() * 60 + ptStart.getMinutes()
                 const idx = Math.round((slotMins - shift.dayStartMinutes) / shift.blockSizeMinutes)
@@ -915,7 +923,9 @@ export function CalendarView({
         existingStream={selectedSlot?.existingStream ?? null}
         hosts={initialHosts}
         producers={initialProducers}
+        moderators={initialModerators}
         isAdmin={isAdmin}
+        canBook={canBook}
         currentUserId={currentUserId}
         currentHost={currentHost}
         hasPendingCancel={

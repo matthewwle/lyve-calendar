@@ -39,7 +39,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
   async function refreshStreams() {
     const { data } = await supabase
       .from('streams')
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name), moderator:moderators(id,name)')
       .order('start_time')
     if (data) setStreams(data as StreamWithRelations[])
   }
@@ -57,7 +57,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
     const { data, error } = await supabase
       .from('streams')
       .insert(payload)
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name), moderator:moderators(id,name)')
       .single()
 
     if (error) throw error
@@ -79,7 +79,7 @@ export function useStreams(initialStreams: StreamWithRelations[]) {
       .from('streams')
       .update(payload)
       .eq('id', id)
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name), moderator:moderators(id,name)')
       .single()
 
     if (error) throw error

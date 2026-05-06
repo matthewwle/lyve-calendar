@@ -2,13 +2,14 @@ import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { CalendarHeader } from '@/components/calendar/CalendarHeader'
-import { resolveRole } from '@/lib/role'
+import { resolveRole, resolveUserRoles } from '@/lib/role'
 import { nowPtAsUtc } from '@/lib/utils'
 import type {
   Brand,
   BrandShiftRate,
   BrandShiftOverride,
   Host,
+  Moderator,
   Producer,
   Profile,
   StreamWithRelations,
@@ -33,6 +34,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
 
   const profile = profileData as Profile | null
   const { effectiveIsAdmin: isAdmin } = await resolveRole(profile)
+  const userRoles = await resolveUserRoles(supabase, user.id, isAdmin)
 
   const { data: brandData } = await supabase
     .from('brands')
@@ -43,41 +45,53 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
   const brand = brandData as Brand | null
   if (!brand) notFound()
 
-  // Eligibility: non-admins must be linked to a host that's assigned to this brand
-  if (!isAdmin) {
-    const { data: myHost } = await supabase
-      .from('hosts')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (!myHost) {
+  // Eligibility:
+  //   - admins can view every brand calendar
+  //   - producers/moderators can view every brand (read-only)
+  //   - hosts must be linked to this specific brand
+  //   - everyone else gets bounced
+  let isHostOfThisBrand = false
+  if (!isAdmin && !userRoles.isProducer && !userRoles.isModerator) {
+    if (!userRoles.hostId) {
       redirect('/calendar')
-    } else {
-      const { data: link } = await supabase
-        .from('brand_hosts')
-        .select('brand_id')
-        .eq('brand_id', brandId)
-        .eq('host_id', myHost.id)
-        .maybeSingle()
-      if (!link) redirect('/calendar')
     }
+    const { data: link } = await supabase
+      .from('brand_hosts')
+      .select('brand_id')
+      .eq('brand_id', brandId)
+      .eq('host_id', userRoles.hostId)
+      .maybeSingle()
+    if (!link) redirect('/calendar')
+    isHostOfThisBrand = true
+  } else if (!isAdmin && userRoles.hostId) {
+    // Producer/moderator who's also a host on this brand keeps their book/cancel rights.
+    const { data: link } = await supabase
+      .from('brand_hosts')
+      .select('brand_id')
+      .eq('brand_id', brandId)
+      .eq('host_id', userRoles.hostId)
+      .maybeSingle()
+    isHostOfThisBrand = !!link
   }
+  // canBook drives the calendar's interactive vs read-only mode.
+  const canBook = isAdmin || isHostOfThisBrand
 
   const [
     { data: streamsData },
     { data: hostsData },
     { data: producersData },
+    { data: moderatorsData },
     { data: ratesData },
     { data: currentHostData },
   ] = await Promise.all([
     supabase
       .from('streams')
-      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name)')
+      .select('*, host:hosts(id,name), brand:brands(id,name), producer:producers(id,name), moderator:moderators(id,name)')
       .eq('brand_id', brandId)
       .order('start_time'),
     supabase.from('hosts').select('*').order('name'),
     supabase.from('producers').select('*').order('name'),
+    supabase.from('moderators').select('*').order('name'),
     supabase.from('brand_shift_rates').select('*').eq('brand_id', brandId),
     supabase.from('hosts').select('id,name').eq('user_id', user.id).maybeSingle(),
   ])
@@ -136,6 +150,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
           initialStreams={(streamsData as StreamWithRelations[] | null) ?? []}
           initialHosts={(hostsData as Host[] | null) ?? []}
           initialProducers={(producersData as Producer[] | null) ?? []}
+          initialModerators={(moderatorsData as Moderator[] | null) ?? []}
           initialShiftRates={shiftRates}
           initialShiftOverrides={shiftOverrides}
           shift={{
@@ -144,6 +159,7 @@ export default async function BrandCalendarPage({ params }: BrandCalendarPagePro
             dayEndMinutes:    brand.day_end_minutes,
           }}
           isAdmin={isAdmin}
+          canBook={canBook}
           currentUserId={user.id}
           currentHost={currentHost}
           conflicts={conflicts}

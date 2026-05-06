@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { Users, Building2, Mic, Shield, LogOut, Plus, Eye, ShieldCheck, ClipboardList, Settings, LayoutDashboard } from 'lucide-react'
+import { Users, Building2, Mic, Shield, LogOut, Plus, Eye, ShieldCheck, ClipboardList, ClipboardCheck, Settings, LayoutDashboard, Megaphone } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Brand, Profile } from '@/lib/supabase/types'
 import { cn } from '@/lib/utils'
@@ -21,6 +21,8 @@ interface SidebarProps {
   actualIsAdmin: boolean
   viewingAsHost: boolean
   hasHostProfile: boolean
+  isProducer: boolean
+  isModerator: boolean
   headshotUrl?: string | null
   userId: string
 }
@@ -30,10 +32,11 @@ const adminLinks = [
   { href: '/admin/hosts', label: 'Hosts', icon: Users },
   { href: '/admin/brands', label: 'Brands', icon: Building2 },
   { href: '/admin/producers', label: 'Producers', icon: Mic },
+  { href: '/admin/moderators', label: 'Moderators', icon: Megaphone },
   { href: '/admin/users', label: 'Admins', icon: Shield },
 ]
 
-export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile, headshotUrl, userId }: SidebarProps) {
+export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHostProfile, isProducer, isModerator, headshotUrl, userId }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   // Effective admin = real admin AND not currently impersonating a host
@@ -131,6 +134,23 @@ export function Sidebar({ profile, brands, actualIsAdmin, viewingAsHost, hasHost
           >
             <ClipboardList className="w-4 h-4 flex-shrink-0" />
             My Shifts
+          </Link>
+        )}
+
+        {/* My Assignments — producers + moderators see their booked shifts here */}
+        {(isProducer || isModerator) && (
+          <Link
+            href="/assignments"
+            className={cn(
+              'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              !hasHostProfile && 'mt-4',
+              pathname === '/assignments'
+                ? 'bg-primary/15 text-primary'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+            )}
+          >
+            <ClipboardCheck className="w-4 h-4 flex-shrink-0" />
+            My Assignments
           </Link>
         )}
 
