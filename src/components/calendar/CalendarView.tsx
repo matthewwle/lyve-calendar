@@ -125,16 +125,27 @@ export function CalendarView({
     [shift]
   )
 
-  const rates = useMemo(() => buildRateLookup(initialShiftRates), [initialShiftRates])
+  // Local state mirrors of the rate prop arrays so we can apply optimistic
+  // updates after admin actions (Set Rate, Block, Set for all future times)
+  // without relying on router.refresh() — which can lag if Next.js's segment
+  // cache doesn't invalidate quickly enough on a per-route data change.
+  const [shiftRates, setShiftRates] = useState<BrandShiftRate[]>(initialShiftRates)
+  const [shiftOverrides, setShiftOverrides] = useState<BrandShiftOverride[]>(initialShiftOverrides)
+
+  // Re-sync if the parent passes new props (router.refresh() success path)
+  useEffect(() => { setShiftRates(initialShiftRates) }, [initialShiftRates])
+  useEffect(() => { setShiftOverrides(initialShiftOverrides) }, [initialShiftOverrides])
+
+  const rates = useMemo(() => buildRateLookup(shiftRates), [shiftRates])
 
   // Per-(date, block) overrides — quick lookup via "yyyy-mm-dd-idx" key
   const overrideMap = useMemo(() => {
     const m = new Map<string, number>()
-    for (const o of initialShiftOverrides) {
+    for (const o of shiftOverrides) {
       m.set(`${o.shift_date}-${o.block_index}`, o.rate_cents)
     }
     return m
-  }, [initialShiftOverrides])
+  }, [shiftOverrides])
 
   // Date keys are derived from the cell's PT calendar date so they line up with
   // brand_shift_overrides.shift_date (which is the PT-relative civil date).
@@ -627,6 +638,25 @@ export function CalendarView({
       return
     }
 
+    // Optimistic local state: merge the new overrides so the cells re-render
+    // immediately without waiting for router.refresh().
+    setShiftOverrides(prev => {
+      const merged = new Map(
+        prev.map(o => [`${o.brand_id}-${o.shift_date}-${o.block_index}`, o]),
+      )
+      const created_at = new Date().toISOString()
+      for (const r of overrideRows) {
+        merged.set(`${r.brand_id}-${r.shift_date}-${r.block_index}`, {
+          brand_id: r.brand_id,
+          shift_date: r.shift_date,
+          block_index: r.block_index,
+          rate_cents: r.rate_cents,
+          created_at,
+        })
+      }
+      return Array.from(merged.values())
+    })
+
     toast({
       title: `Updated ${selectedCells.size} shift${selectedCells.size === 1 ? '' : 's'} this week`,
       description: `Set to ${formatCents(cents)}/hr`,
@@ -635,66 +665,113 @@ export function CalendarView({
     router.refresh()
   }
 
-  // "Set for all future times": snapshot the visible week's effective rates
-  // as the new default template, and clear any overrides for future dates so
-  // they fall back to the new template.
+  // "Set for this & all future" — applies the typed rate to the SELECTED
+  // cells starting from the visible week and continuing forever. Same inputs
+  // as Set Rate, but writes to defaults instead of per-date overrides AND
+  // clears any existing overrides for those same (day-of-week, block) pairs
+  // from the visible week onward so the new default actually shows up.
+  //
+  // Rate model recap:
+  //   - brand_shift_rates       → DEFAULTS per (brand, day-of-week, block).
+  //   - brand_shift_overrides   → PER-DATE exceptions. Win on that date.
+  //   - Set Rate                → writes overrides for THIS week only.
+  //   - Set for all future      → writes defaults + clears matching future
+  //                               overrides. Atomic via SECURITY DEFINER RPC.
   async function applyAsFutureTemplate() {
+    const rate = parseFloat(bulkRate)
+    if (isNaN(rate) || rate < 0) {
+      toast({ title: 'Enter a valid rate', variant: 'destructive' })
+      return
+    }
+    if (selectedCells.size === 0) {
+      toast({ title: 'No shifts selected', variant: 'destructive' })
+      return
+    }
     if (!activeRange) {
       toast({ title: 'No active week', variant: 'destructive' })
       return
     }
+
     setApplying(true)
+    try {
+      const cents = Math.round(rate * 100)
 
-    // Build one rate row per (dow, idx) for every cell in the visible week
-    const newDefaults: { brand_id: string; day_of_week: number; block_index: number; rate_cents: number; is_blocked: boolean }[] = []
-    for (let dow = 0; dow < 7; dow++) {
-      const d = dateForDow(dow)
-      if (!d) continue
-      for (let idx = 0; idx < blockCount; idx++) {
-        newDefaults.push({
-          brand_id: brandId,
-          day_of_week: dow,
-          block_index: idx,
-          rate_cents: effectiveRate(d, idx),
-          is_blocked: rates.isBlocked(dow, idx), // preserve current blocked state
+      // Build defaults from the selected (dow, block_index) pairs, all set
+      // to the typed rate. Preserve each cell's current blocked state.
+      const newDefaults: { day_of_week: number; block_index: number; rate_cents: number; is_blocked: boolean }[] =
+        Array.from(selectedCells).map(key => {
+          const [dowStr, idxStr] = key.split('-')
+          const dow = parseInt(dowStr, 10)
+          const idx = parseInt(idxStr, 10)
+          return {
+            day_of_week: dow,
+            block_index: idx,
+            rate_cents: cents,
+            is_blocked: rates.isBlocked(dow, idx),
+          }
         })
+
+      const supabase = createClient()
+      // Include the visible week itself in the clear, so the rate the admin
+      // sees on the visible week's selected cells matches what they typed.
+      // Otherwise an existing override on this week would still beat the new
+      // default and the cell wouldn't visually update.
+      const fromDate = dateKey(activeRange.start)
+      const { data: clearedCount, error } = await supabase.rpc('apply_rate_template', {
+        p_brand_id: brandId,
+        p_defaults: newDefaults,
+        p_from_date: fromDate,
+      })
+
+      if (error) {
+        console.error('[applyAsFutureTemplate] apply_rate_template RPC failed', error)
+        toast({ title: 'Could not save', description: error.message, variant: 'destructive' })
+        return
       }
-    }
 
-    const supabase = createClient()
+      // Optimistic local update so the new rates show up immediately.
+      setShiftRates(prev => {
+        const merged = new Map(prev.map(r => [`${r.day_of_week}-${r.block_index}`, r]))
+        for (const d of newDefaults) {
+          merged.set(`${d.day_of_week}-${d.block_index}`, {
+            brand_id: brandId,
+            day_of_week: d.day_of_week,
+            block_index: d.block_index,
+            rate_cents: d.rate_cents,
+            is_blocked: d.is_blocked,
+          })
+        }
+        return Array.from(merged.values())
+      })
+      // Drop only the future overrides that match the (dow, block) pairs
+      // we just updated — leave unrelated overrides alone.
+      const pairKeys = new Set(newDefaults.map(d => `${d.day_of_week}-${d.block_index}`))
+      setShiftOverrides(prev => prev.filter(o => {
+        if (o.shift_date < fromDate) return true
+        const [y, m, d] = o.shift_date.split('-').map(Number)
+        const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+        return !pairKeys.has(`${dow}-${o.block_index}`)
+      }))
 
-    // 1. Promote effective rates to defaults
-    const { error: e1 } = await supabase
-      .from('brand_shift_rates')
-      .upsert(newDefaults, { onConflict: 'brand_id,day_of_week,block_index' })
-
-    if (e1) {
+      const cleared = typeof clearedCount === 'number' ? clearedCount : 0
+      toast({
+        title: `Locked in ${selectedCells.size} shift${selectedCells.size === 1 ? '' : 's'} forever`,
+        description: cleared > 0
+          ? `${formatCents(cents)}/hr applied. Cleared ${cleared} matching per-date override${cleared === 1 ? '' : 's'}.`
+          : `${formatCents(cents)}/hr applied to every future week.`,
+      })
+      exitSelectMode()
+      router.refresh()
+    } catch (err) {
+      console.error('[applyAsFutureTemplate] unhandled', err)
+      toast({
+        title: 'Could not save',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
       setApplying(false)
-      toast({ title: 'Error', description: e1.message, variant: 'destructive' })
-      return
     }
-
-    // 2. Wipe overrides for dates in or after the next visible week so future
-    //    weeks fall back to the new defaults
-    const { error: e2 } = await supabase
-      .from('brand_shift_overrides')
-      .delete()
-      .eq('brand_id', brandId)
-      .gte('shift_date', dateKey(activeRange.end))
-
-    setApplying(false)
-
-    if (e2) {
-      toast({ title: 'Error', description: e2.message, variant: 'destructive' })
-      return
-    }
-
-    toast({
-      title: 'Locked in as future template',
-      description: 'This week’s rates now apply to every future week.',
-    })
-    exitSelectMode()
-    router.refresh()
   }
 
   async function applyBlocked(blocked: boolean) {
@@ -716,6 +793,16 @@ export function CalendarView({
       toast({ title: 'Error', description: error.message, variant: 'destructive' })
       return
     }
+
+    // Optimistic local state: merge the upserted rows so cells re-render
+    // immediately (red X / unblocked) without waiting on router.refresh().
+    setShiftRates(prev => {
+      const merged = new Map(prev.map(r => [`${r.day_of_week}-${r.block_index}`, r]))
+      for (const r of rows) {
+        merged.set(`${r.day_of_week}-${r.block_index}`, r as BrandShiftRate)
+      }
+      return Array.from(merged.values())
+    })
 
     toast({
       title: `${blocked ? 'Blocked' : 'Unblocked'} ${selectedCells.size} shift${selectedCells.size === 1 ? '' : 's'}`,
@@ -867,17 +954,18 @@ export function CalendarView({
 
           <div className="h-5 w-px bg-border" />
 
-          {/* Promote this week's rates to the all-future template */}
+          {/* Apply the typed rate to selected cells forever (defaults +
+              clear matching future overrides). Shares the $ input above. */}
           <Button
             size="sm"
             variant="outline"
             onClick={applyAsFutureTemplate}
-            disabled={applying || !activeRange || currentView !== 'timeGridWeek'}
+            disabled={applying || selectedCells.size === 0 || !bulkRate || !activeRange || currentView !== 'timeGridWeek'}
             className="gap-1.5"
-            title="Snapshot this week's rates and use them as the default for every future week"
+            title="Apply the typed rate to selected cells starting this week and every future week. Clears any matching per-date overrides."
           >
             <CalendarRange className="w-3.5 h-3.5" />
-            Set for all future times
+            Set for this &amp; all future
           </Button>
 
           <div className="h-5 w-px bg-border" />
